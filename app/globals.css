@@ -1,0 +1,47 @@
+@import "tailwindcss";
+@import "../styles/design-tokens.css";
+@import "../styles/animations.css";
+
+@theme inline {
+  --color-primary: var(--color-primary);
+  --color-primary-600: var(--color-primary-600);
+  --color-primary-300: var(--color-primary-300);
+  --color-accent: var(--color-accent);
+  --color-success: var(--color-success);
+  --color-danger: var(--color-danger);
+  --color-warning: var(--color-warning);
+
+  --color-background: var(--color-background);
+  --color-surface: var(--color-surface);
+  --color-border: var(--color-border);
+  --color-text: var(--color-text);
+  --color-text-secondary: var(--color-text-secondary);
+
+  --color-link: var(--color-link);
+  --color-link-hover: var(--color-link-hover);
+  --color-input-focus: var(--color-input-focus);
+
+  --color-status-running: var(--color-status-running);
+  --color-status-completed: var(--color-status-completed);
+  --color-status-failed: var(--color-status-failed);
+  --color-status-queued: var(--color-status-queued);
+  --color-status-paused: var(--color-status-paused);
+
+  --radius: var(--radius-default);
+  --radius-sm: var(--radius-sm);
+  --radius-lg: var(--radius-lg);
+  --radius-full: var(--radius-full);
+
+  --shadow-subtle: var(--shadow-subtle);
+  --shadow-medium: var(--shadow-medium);
+  --shadow-heavy: var(--shadow-heavy);
+
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}

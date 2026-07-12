@@ -1,0 +1,11 @@
+{
+  "build": {
+    "builder": "nixpacks"
+  },
+  "deploy": {
+    "startCommand": "npm run start"
+  },
+  "volumes": {
+    "/var/data": "mti-ai-research-volume"
+  }
+}

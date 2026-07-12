@@ -1,0 +1,61 @@
+:root {
+  /* Functional Colors */
+  --color-primary: #2563eb;
+  --color-primary-600: #1d4ed8;
+  --color-primary-300: #93c5fd;
+  --color-accent: #f59e0b;
+  --color-success: #10b981;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+
+  /* Semantic Colors */
+  --color-background: #f9fafb;
+  --color-surface: #ffffff;
+  --color-border: #e5e7eb;
+  --color-text: #1f2937;
+  --color-text-secondary: #6b7280;
+
+  /* Component Colors */
+  --color-link: #2563eb;
+  --color-link-hover: #1d4ed8;
+  --color-input-focus: #3b82f6;
+
+  /* Status Colors */
+  --color-status-running: #3b82f6;
+  --color-status-completed: #10b981;
+  --color-status-failed: #ef4444;
+  --color-status-queued: #6b7280;
+  --color-status-paused: #f59e0b;
+
+  /* Spacing (4px base unit) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Border Radius */
+  --radius-default: 8px;
+  --radius-sm: 4px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-subtle: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-medium: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-heavy: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  /* Animation */
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 150ms;
+  --duration-default: 200ms;
+
+  /* Layout */
+  --layout-sidebar-width: 280px;
+  --layout-topbar-height: 60px;
+  --layout-right-sidebar-width: 320px;
+}
