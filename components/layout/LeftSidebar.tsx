@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Icon, type IconName } from "@/components/common/Icon";
 import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: "◧" },
-  { href: "/email", label: "Email", icon: "✉" },
-  { href: "/companies", label: "Companies", icon: "▤" },
-  { href: "/admin", label: "Admin", icon: "⚙" },
-] as const;
+const NAV_ITEMS: { href: string; label: string; icon: IconName }[] = [
+  { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
+  { href: "/email", label: "Email", icon: "mail" },
+  { href: "/companies", label: "Companies", icon: "building" },
+  { href: "/admin", label: "Admin", icon: "settings" },
+];
 
 export function LeftSidebar() {
   const pathname = usePathname();
@@ -33,7 +34,7 @@ export function LeftSidebar() {
                   : "text-text-secondary hover:bg-background hover:text-text",
               )}
             >
-              <span aria-hidden>{item.icon}</span>
+              <Icon name={item.icon} className="h-5 w-5 shrink-0" />
               {item.label}
             </Link>
           );

@@ -2,6 +2,7 @@
 
 import { type HTMLAttributes, type ReactNode, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { Icon } from "@/components/common/Icon";
 import { cn } from "@/lib/utils";
 
 type ModalVariant = "center" | "sidebar" | "fullscreen";
@@ -61,7 +62,7 @@ function ModalRoot({ open, onClose, title, variant = "center", children }: Modal
               aria-label="Close"
               className="rounded-full p-1 text-text-secondary hover:bg-background hover:text-text"
             >
-              ✕
+              <Icon name="close" className="h-5 w-5" />
             </button>
           </div>
         )}

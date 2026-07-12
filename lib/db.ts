@@ -18,7 +18,7 @@ function createPool() {
 // Lazily create the pool on first use (not at import time) so merely
 // importing this module doesn't crash builds/routes in environments where
 // DATABASE_URL isn't configured yet. Reuse the pool across dev hot reloads.
-function getPool() {
+export function getPool() {
   if (!global.__pgPool) {
     global.__pgPool = createPool();
   }

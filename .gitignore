@@ -40,6 +40,9 @@ yarn-error.log*
 # local file storage fallback (dev only; Railway volume mounts /var/data in prod)
 /var-data
 
+# local dev Postgres cluster (isolated, project-local — see .env.local)
+/.devdb
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

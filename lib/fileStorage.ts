@@ -8,8 +8,8 @@ import path from "node:path";
 function resolveStorageRoot() {
   const configured = process.env.STORAGE_PATH || "/var/data";
   try {
-    mkdirSync(configured, { recursive: true });
-    accessSync(configured, constants.W_OK);
+    mkdirSync(/* turbopackIgnore: true */ configured, { recursive: true });
+    accessSync(/* turbopackIgnore: true */ configured, constants.W_OK);
     return configured;
   } catch {
     const fallback = path.join(process.cwd(), "var-data");
@@ -21,7 +21,7 @@ function resolveStorageRoot() {
 export const STORAGE_ROOT = resolveStorageRoot();
 
 function resolvePath(relativePath: string) {
-  const resolved = path.resolve(STORAGE_ROOT, relativePath);
+  const resolved = path.resolve(/* turbopackIgnore: true */ STORAGE_ROOT, relativePath);
   if (!resolved.startsWith(STORAGE_ROOT)) {
     throw new Error(`Path escapes storage root: ${relativePath}`);
   }
@@ -30,19 +30,19 @@ function resolvePath(relativePath: string) {
 
 export async function writeStorageFile(relativePath: string, contents: string) {
   const target = resolvePath(relativePath);
-  await mkdir(path.dirname(target), { recursive: true });
-  await writeFile(target, contents, "utf-8");
+  await mkdir(/* turbopackIgnore: true */ path.dirname(target), { recursive: true });
+  await writeFile(/* turbopackIgnore: true */ target, contents, "utf-8");
   return relativePath;
 }
 
 export async function readStorageFile(relativePath: string) {
-  return readFile(resolvePath(relativePath), "utf-8");
+  return readFile(/* turbopackIgnore: true */ resolvePath(relativePath), "utf-8");
 }
 
 export async function deleteStorageFile(relativePath: string) {
-  await unlink(resolvePath(relativePath));
+  await unlink(/* turbopackIgnore: true */ resolvePath(relativePath));
 }
 
 export async function listStorageDir(relativePath: string) {
-  return readdir(resolvePath(relativePath));
+  return readdir(/* turbopackIgnore: true */ resolvePath(relativePath));
 }

@@ -40,6 +40,13 @@ export interface Company {
   updated_at: string;
 }
 
+// Shape returned by GET /api/companies/[id] — the row plus linked records
+// read directly from the emails/agent_tasks tables (no separate endpoints).
+export interface CompanyWithLinks extends Company {
+  linked_emails: Email[];
+  linked_tasks: AgentTask[];
+}
+
 export interface CompanyEdit {
   id: string;
   company_id: string;
@@ -54,6 +61,7 @@ export interface Email {
   id: string;
   org_id: string | null;
   company_id: string | null;
+  thread_id: string | null;
   from_address: string | null;
   to_address: string | null;
   cc: string[] | null;
@@ -68,6 +76,12 @@ export interface Email {
   sent_at: string | null;
 }
 
+// Email API responses inline the body content read from file storage,
+// rather than making the client fetch it separately.
+export interface EmailWithBody extends Email {
+  body?: string;
+}
+
 export interface EmailThread {
   id: string;
   org_id: string | null;
@@ -77,6 +91,20 @@ export interface EmailThread {
   participant_emails: string[] | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface EmailInternalNote {
+  id: string;
+  email_id: string;
+  user_id: string | null;
+  note: string;
+  created_at: string;
+}
+
+export interface EmailDetail extends EmailWithBody {
+  thread: EmailThread | null;
+  thread_emails: EmailWithBody[];
+  notes: EmailInternalNote[];
 }
 
 export interface AgentTask {
@@ -114,4 +142,10 @@ export interface AgentWorkLogEntry {
   cost_cents: number | null;
   accuracy_score: number | null;
   created_at: string;
+}
+
+// Logs API response shape: the raw row plus the response file's contents
+// inlined (read server-side), since work logs are small at this stage.
+export interface AgentWorkLogEntryWithResponse extends AgentWorkLogEntry {
+  response?: string;
 }

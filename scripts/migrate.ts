@@ -1,7 +1,9 @@
-import "dotenv/config";
+import { config } from "dotenv";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { Pool } from "pg";
+
+config({ path: ".env.local" });
 
 const migrationsDir = path.join(process.cwd(), "migrations");
 

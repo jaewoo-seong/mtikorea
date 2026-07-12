@@ -3,7 +3,11 @@
   --color-primary: #2563eb;
   --color-primary-600: #1d4ed8;
   --color-primary-300: #93c5fd;
-  --color-accent: #f59e0b;
+  /* Accent + text/border refined per ui-ux-pro-max's "CRM & Client
+     Management" reference palette (product-type row 101): professional
+     blue + closed-won green, cooler slate text instead of Phase 1's
+     generic gray copied verbatim from the original spec doc. */
+  --color-accent: #059669;
   --color-success: #10b981;
   --color-danger: #ef4444;
   --color-warning: #f59e0b;
@@ -11,9 +15,9 @@
   /* Semantic Colors */
   --color-background: #f9fafb;
   --color-surface: #ffffff;
-  --color-border: #e5e7eb;
-  --color-text: #1f2937;
-  --color-text-secondary: #6b7280;
+  --color-border: #e4ecfc;
+  --color-text: #0f172a;
+  --color-text-secondary: #64748b;
 
   /* Component Colors */
   --color-link: #2563eb;
