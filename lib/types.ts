@@ -128,6 +128,19 @@ export interface AgentTask {
   estimated_cost: number;
 }
 
+export interface AgentTaskResult {
+  id: string;
+  task_id: string;
+  category: string | null;
+  title: string | null;
+  summary: string | null;
+  findings_file_path: string | null;
+  full_response_file_path: string | null;
+  confidence_score: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AgentWorkLogEntry {
   id: string;
   task_id: string;
