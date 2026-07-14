@@ -25,6 +25,15 @@ body {
   font-family: 'DM Sans', system-ui, sans-serif;
 }
 
+.email-body img { max-width: 100%; height: auto; }
+.email-body a { color: #2563eb; text-decoration: underline; }
+.email-body blockquote {
+  border-left: 3px solid #e5e7eb;
+  padding-left: 12px;
+  color: #64748b;
+  margin: 12px 0;
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition;

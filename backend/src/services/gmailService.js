@@ -2,6 +2,17 @@ const { google } = require('googleapis');
 const { query } = require('../lib/db');
 const { saveBuffer } = require('../lib/storage');
 
+const FOLDER_QUERIES = {
+  inbox: 'in:inbox',
+  spam: 'in:spam',
+  sent: 'in:sent',
+  trash: 'in:trash',
+  drafts: 'in:drafts',
+  starred: 'is:starred',
+  important: 'is:important',
+  all: 'in:anywhere -in:trash -in:spam',
+};
+
 function clientFromTokens(refreshToken, accessToken) {
   const oauth2 = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -58,29 +69,151 @@ async function findClientByAddress(orgId, address) {
   return null;
 }
 
-function decodeBody(payload) {
-  const parts = [];
+function decodePartData(data) {
+  if (!data) return '';
+  return Buffer.from(data, 'base64url').toString('utf8');
+}
+
+function extractBodies(payload) {
+  let text = '';
+  let html = '';
+  let hasAttachments = false;
+
   function walk(p) {
     if (!p) return;
-    if (p.body?.data) {
-      parts.push(Buffer.from(p.body.data, 'base64url').toString('utf8'));
+    const mime = (p.mimeType || '').toLowerCase();
+    if (p.filename && p.body?.attachmentId) hasAttachments = true;
+    if (mime === 'text/plain' && p.body?.data && !text) {
+      text = decodePartData(p.body.data);
+    }
+    if (mime === 'text/html' && p.body?.data && !html) {
+      html = decodePartData(p.body.data);
     }
     (p.parts || []).forEach(walk);
   }
   walk(payload);
-  return parts.join('\n\n');
+  if (!text && html) {
+    text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  return { text, html, hasAttachments };
 }
 
-async function syncInbox(orgId, { max = 25 } = {}) {
-  const pair = await gmailClient(orgId);
-  if (!pair) {
-    return { synced: 0, reason: 'no_gmail_account' };
+function folderFromLabels(labelIds = []) {
+  const set = new Set(labelIds);
+  if (set.has('SPAM')) return 'spam';
+  if (set.has('TRASH')) return 'trash';
+  if (set.has('DRAFT')) return 'drafts';
+  if (set.has('SENT') && !set.has('INBOX')) return 'sent';
+  if (set.has('INBOX')) return 'inbox';
+  if (set.has('STARRED')) return 'starred';
+  return 'all';
+}
+
+function splitAddresses(value) {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+async function upsertMessage(orgId, full, fallbackFolder) {
+  const headers = full.data.payload?.headers || [];
+  const get = (n) => headers.find((h) => h.name.toLowerCase() === n)?.value || '';
+  const subject = get('subject');
+  const from = get('from');
+  const to = get('to');
+  const cc = splitAddresses(get('cc'));
+  const bcc = splitAddresses(get('bcc'));
+  const replyTo = get('reply-to') || null;
+  const date = get('date');
+  const threadId = full.data.threadId;
+  const labelIds = full.data.labelIds || [];
+  const folder = folderFromLabels(labelIds) || fallbackFolder || 'inbox';
+  const { text, html, hasAttachments } = extractBodies(full.data.payload);
+  const textSaved = saveBuffer('emails', `${full.data.id}.txt`, Buffer.from(text || full.data.snippet || '', 'utf8'));
+  let htmlPath = null;
+  if (html) {
+    htmlPath = saveBuffer('emails', `${full.data.id}.html`, Buffer.from(html, 'utf8')).storagePath;
   }
+  const clientId = await findClientByAddress(orgId, from);
+  const isUnread = labelIds.includes('UNREAD');
+  const isStarred = labelIds.includes('STARRED');
+  const direction = labelIds.includes('SENT') && !labelIds.includes('INBOX') ? 'sent' : 'received';
+  const when = date ? new Date(date) : new Date();
+
+  const threadRow = await query(
+    `INSERT INTO email_threads (org_id, client_id, gmail_thread_id, subject, participant_emails, last_message_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (org_id, gmail_thread_id) DO UPDATE SET
+       subject = COALESCE(EXCLUDED.subject, email_threads.subject),
+       client_id = COALESCE(email_threads.client_id, EXCLUDED.client_id),
+       last_message_at = GREATEST(email_threads.last_message_at, EXCLUDED.last_message_at),
+       updated_at = now()
+     RETURNING id`,
+    [orgId, clientId, threadId, subject, [from, ...splitAddresses(to)].filter(Boolean), when]
+  );
+
+  const { rows } = await query(
+    `INSERT INTO emails (
+       org_id, thread_id, client_id, from_address, to_address, cc, bcc, reply_to, subject, snippet,
+       body_file_path, body_html_path, gmail_message_id, gmail_thread_id, direction, read, flagged,
+       folder, labels, has_attachments, received_at, sent_at
+     ) VALUES (
+       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+     )
+     ON CONFLICT (gmail_message_id) DO UPDATE SET
+       subject = EXCLUDED.subject,
+       snippet = EXCLUDED.snippet,
+       body_file_path = EXCLUDED.body_file_path,
+       body_html_path = COALESCE(EXCLUDED.body_html_path, emails.body_html_path),
+       folder = EXCLUDED.folder,
+       labels = EXCLUDED.labels,
+       read = EXCLUDED.read,
+       flagged = EXCLUDED.flagged,
+       has_attachments = EXCLUDED.has_attachments,
+       client_id = COALESCE(emails.client_id, EXCLUDED.client_id),
+       cc = EXCLUDED.cc,
+       reply_to = EXCLUDED.reply_to
+     RETURNING *`,
+    [
+      orgId,
+      threadRow.rows[0].id,
+      clientId,
+      from,
+      to,
+      cc,
+      bcc,
+      replyTo,
+      subject,
+      full.data.snippet || '',
+      textSaved.storagePath,
+      htmlPath,
+      full.data.id,
+      threadId,
+      direction,
+      !isUnread,
+      isStarred,
+      folder,
+      labelIds,
+      hasAttachments,
+      direction === 'received' ? when : null,
+      direction === 'sent' ? when : null,
+    ]
+  );
+  return rows[0];
+}
+
+async function syncFolder(orgId, folder, { max = 50, search = '' } = {}) {
+  const pair = await gmailClient(orgId);
+  if (!pair) return { synced: 0, reason: 'no_gmail_account' };
   const { gmail } = pair;
+  const base = FOLDER_QUERIES[folder] || FOLDER_QUERIES.inbox;
+  const q = search ? `${base} ${search}`.trim() : base;
   const list = await gmail.users.messages.list({
     userId: 'me',
-    maxResults: max,
-    q: 'in:inbox',
+    maxResults: Math.min(max, 100),
+    q,
   });
   const messages = list.data.messages || [];
   let synced = 0;
@@ -90,87 +223,145 @@ async function syncInbox(orgId, { max = 25 } = {}) {
       id: m.id,
       format: 'full',
     });
-    const headers = full.data.payload?.headers || [];
-    const get = (n) => headers.find((h) => h.name.toLowerCase() === n)?.value || '';
-    const subject = get('subject');
-    const from = get('from');
-    const to = get('to');
-    const date = get('date');
-    const threadId = full.data.threadId;
-    const body = decodeBody(full.data.payload);
-    const saved = saveBuffer('emails', `${m.id}.txt`, Buffer.from(body || full.data.snippet || '', 'utf8'));
-    const clientId = await findClientByAddress(orgId, from);
-
-    let threadRow = await query(
-      `INSERT INTO email_threads (org_id, client_id, gmail_thread_id, subject, participant_emails, last_message_at)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       ON CONFLICT (org_id, gmail_thread_id) DO UPDATE SET
-         subject = COALESCE(EXCLUDED.subject, email_threads.subject),
-         client_id = COALESCE(email_threads.client_id, EXCLUDED.client_id),
-         last_message_at = GREATEST(email_threads.last_message_at, EXCLUDED.last_message_at),
-         updated_at = now()
-       RETURNING id`,
-      [
-        orgId,
-        clientId,
-        threadId,
-        subject,
-        [from, to].filter(Boolean),
-        date ? new Date(date) : new Date(),
-      ]
-    );
-
-    await query(
-      `INSERT INTO emails (
-         org_id, thread_id, client_id, from_address, to_address, subject, snippet,
-         body_file_path, gmail_message_id, direction, read, received_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'received',$10,$11)
-       ON CONFLICT (gmail_message_id) DO NOTHING`,
-      [
-        orgId,
-        threadRow.rows[0].id,
-        clientId,
-        from,
-        to,
-        subject,
-        full.data.snippet || '',
-        saved.storagePath,
-        m.id,
-        !(full.data.labelIds || []).includes('UNREAD'),
-        date ? new Date(date) : new Date(),
-      ]
-    );
+    await upsertMessage(orgId, full, folder);
     synced += 1;
   }
-  return { synced };
+  return { synced, folder, query: q };
 }
 
-async function sendReply(orgId, { to, subject, body, threadId }) {
+async function syncMailbox(orgId, { folders = ['inbox', 'spam', 'sent', 'trash', 'drafts', 'starred'], max = 40 } = {}) {
+  const pair = await gmailClient(orgId);
+  if (!pair) return { synced: 0, reason: 'no_gmail_account', byFolder: {} };
+  const byFolder = {};
+  let total = 0;
+  for (const folder of folders) {
+    const r = await syncFolder(orgId, folder, { max });
+    byFolder[folder] = r.synced;
+    total += r.synced;
+  }
+  return { synced: total, byFolder };
+}
+
+function encodeRawMime({ from, to, cc, bcc, subject, html, text, inReplyTo, references }) {
+  const boundary = `mti_${Date.now()}`;
+  const headers = [
+    `From: ${from}`,
+    `To: ${Array.isArray(to) ? to.join(', ') : to}`,
+    cc?.length ? `Cc: ${Array.isArray(cc) ? cc.join(', ') : cc}` : null,
+    bcc?.length ? `Bcc: ${Array.isArray(bcc) ? bcc.join(', ') : bcc}` : null,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    inReplyTo ? `In-Reply-To: ${inReplyTo}` : null,
+    references ? `References: ${references}` : null,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+  ].filter(Boolean);
+
+  const plain = text || String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const htmlBody = html || `<pre style="font-family:sans-serif">${escapeHtml(plain)}</pre>`;
+
+  const raw = [
+    ...headers,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    plain,
+    `--${boundary}`,
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    htmlBody,
+    `--${boundary}--`,
+  ].join('\r\n');
+
+  return Buffer.from(raw).toString('base64url');
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function sendMessage(orgId, { to, cc, bcc, subject, html, text, threadId }) {
   const pair = await gmailClient(orgId);
   if (!pair) throw Object.assign(new Error('Gmail not connected'), { status: 503 });
   const { gmail, account } = pair;
-  const raw = [
-    `From: ${account.email}`,
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    'Content-Type: text/plain; charset=utf-8',
-    '',
-    body,
-  ].join('\r\n');
-  const encoded = Buffer.from(raw).toString('base64url');
+  const raw = encodeRawMime({
+    from: account.email,
+    to,
+    cc,
+    bcc,
+    subject,
+    html,
+    text,
+  });
   const res = await gmail.users.messages.send({
     userId: 'me',
     requestBody: {
-      raw: encoded,
+      raw,
       threadId: threadId || undefined,
     },
   });
+  if (res.data?.id) {
+    const full = await gmail.users.messages.get({ userId: 'me', id: res.data.id, format: 'full' });
+    await upsertMessage(orgId, full, 'sent');
+  }
   return res.data;
+}
+
+async function sendReply(orgId, { to, cc, subject, html, text, body, threadId }) {
+  return sendMessage(orgId, {
+    to,
+    cc,
+    subject,
+    html: html || (body ? `<div>${escapeHtml(body).replace(/\n/g, '<br/>')}</div>` : undefined),
+    text: text || body,
+    threadId,
+  });
+}
+
+async function modifyLabels(orgId, gmailMessageId, { add = [], remove = [] }) {
+  const pair = await gmailClient(orgId);
+  if (!pair) throw Object.assign(new Error('Gmail not connected'), { status: 503 });
+  const { gmail } = pair;
+  await gmail.users.messages.modify({
+    userId: 'me',
+    id: gmailMessageId,
+    requestBody: {
+      addLabelIds: add,
+      removeLabelIds: remove,
+    },
+  });
+  const full = await gmail.users.messages.get({ userId: 'me', id: gmailMessageId, format: 'full' });
+  return upsertMessage(orgId, full);
+}
+
+async function folderCounts(orgId) {
+  const { rows } = await query(
+    `SELECT folder, COUNT(*)::int AS count,
+            COUNT(*) FILTER (WHERE read = false)::int AS unread
+     FROM emails WHERE org_id = $1
+     GROUP BY folder`,
+    [orgId]
+  );
+  const map = {};
+  for (const r of rows) map[r.folder] = { count: r.count, unread: r.unread };
+  return map;
 }
 
 module.exports = {
   getSharedAccount,
-  syncInbox,
+  syncInbox: (orgId, opts) => syncFolder(orgId, 'inbox', opts),
+  syncFolder,
+  syncMailbox,
   sendReply,
+  sendMessage,
+  modifyLabels,
   findClientByAddress,
+  folderCounts,
+  FOLDER_QUERIES,
 };

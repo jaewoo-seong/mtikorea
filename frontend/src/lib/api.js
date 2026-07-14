@@ -51,11 +51,21 @@ export const api = {
 
   emails: {
     status: () => request('/api/emails/status'),
-    list: () => request('/api/emails'),
+    list: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/api/emails${q ? `?${q}` : ''}`);
+    },
     get: (id) => request(`/api/emails/${id}`),
-    sync: () => request('/api/emails/sync', { method: 'POST', body: '{}' }),
+    sync: (body = {}) =>
+      request('/api/emails/sync', { method: 'POST', body: JSON.stringify(body) }),
+    compose: (body) =>
+      request('/api/emails/compose', { method: 'POST', body: JSON.stringify(body) }),
     reply: (id, body) =>
       request(`/api/emails/${id}/reply`, { method: 'POST', body: JSON.stringify(body) }),
+    forward: (id, body) =>
+      request(`/api/emails/${id}/forward`, { method: 'POST', body: JSON.stringify(body) }),
+    action: (id, action) =>
+      request(`/api/emails/${id}/actions`, { method: 'POST', body: JSON.stringify({ action }) }),
     note: (id, note) =>
       request(`/api/emails/${id}/notes`, { method: 'POST', body: JSON.stringify({ note }) }),
     organize: (body) =>
