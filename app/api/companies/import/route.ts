@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { COMPANY_STATUSES } from "@/lib/constants";
 import { query } from "@/lib/db";
 import { parseCsv } from "@/lib/utils";
 import type { Company, CompanyStatus } from "@/lib/types";
 
-const VALID_STATUSES: CompanyStatus[] = ["prospect", "lead", "customer", "inactive"];
 const EXPECTED_HEADERS = [
   "name",
   "korean_name",
@@ -45,6 +45,19 @@ export async function POST(request: Request) {
   const imported: Company[] = [];
   const errors: { row: number; error: string }[] = [];
 
+  interface ParsedRow {
+    rowNum: number;
+    name: string;
+    korean_name: string | null;
+    industry: string | null;
+    website: string | null;
+    email: string | null;
+    phone: string | null;
+    status: string;
+    notes: string | null;
+  }
+
+  const parsed: ParsedRow[] = [];
   for (let i = 1; i < rows.length; i++) {
     const cells = rows[i];
     const name = cells[nameIdx]?.trim();
@@ -60,14 +73,61 @@ export async function POST(request: Request) {
     };
 
     let status = get("status") ?? "prospect";
-    if (!VALID_STATUSES.includes(status as CompanyStatus)) {
+    if (!COMPANY_STATUSES.includes(status as CompanyStatus)) {
       status = "prospect";
+    }
+
+    parsed.push({
+      rowNum: i + 1,
+      name,
+      korean_name: get("korean_name"),
+      industry: get("industry"),
+      website: get("website"),
+      email: get("email"),
+      phone: get("phone"),
+      status,
+      notes: get("notes"),
+    });
+  }
+
+  // A multi-row INSERT ... ON CONFLICT DO UPDATE errors if the same conflict
+  // target (org_id, name) appears twice in one statement, so dedupe within
+  // this file first — last occurrence wins, earlier duplicates are reported.
+  const byName = new Map<string, ParsedRow>();
+  for (const r of parsed) {
+    if (byName.has(r.name)) {
+      errors.push({ row: byName.get(r.name)!.rowNum, error: `duplicate name "${r.name}" in file` });
+    }
+    byName.set(r.name, r);
+  }
+  const deduped = [...byName.values()];
+
+  if (deduped.length > 0) {
+    const valuePlaceholders: string[] = [];
+    const params: unknown[] = [];
+    for (const r of deduped) {
+      const base = params.length;
+      valuePlaceholders.push(
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10})`,
+      );
+      params.push(
+        session.user.orgId,
+        r.name,
+        r.korean_name,
+        r.industry,
+        r.website,
+        r.email,
+        r.phone,
+        r.status,
+        r.notes,
+        session.user.id,
+      );
     }
 
     try {
       const { rows: upserted } = await query<Company>(
         `INSERT INTO companies (org_id, name, korean_name, industry, website, email, phone, status, notes, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         VALUES ${valuePlaceholders.join(", ")}
          ON CONFLICT (org_id, name) DO UPDATE SET
            korean_name = EXCLUDED.korean_name,
            industry = EXCLUDED.industry,
@@ -78,22 +138,14 @@ export async function POST(request: Request) {
            notes = EXCLUDED.notes,
            updated_at = now()
          RETURNING *`,
-        [
-          session.user.orgId,
-          name,
-          get("korean_name"),
-          get("industry"),
-          get("website"),
-          get("email"),
-          get("phone"),
-          status,
-          get("notes"),
-          session.user.id,
-        ],
+        params,
       );
-      imported.push(upserted[0]);
+      imported.push(...upserted);
     } catch (err) {
-      errors.push({ row: i + 1, error: err instanceof Error ? err.message : "unknown error" });
+      const message = err instanceof Error ? err.message : "unknown error";
+      for (const r of deduped) {
+        errors.push({ row: r.rowNum, error: message });
+      }
     }
   }
 

@@ -1,5 +1,10 @@
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
+// A hung upstream request (no response, no error, no TCP reset) would
+// otherwise leave the orchestrator's poll loop stuck forever — its
+// isProcessing flag only clears when this fetch's promise settles.
+const REQUEST_TIMEOUT_MS = 90_000;
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -37,6 +42,7 @@ export async function chatCompletion(
       max_tokens: opts?.maxTokens ?? 1000,
       temperature: opts?.temperature ?? 0.4,
     }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {

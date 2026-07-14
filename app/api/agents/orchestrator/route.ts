@@ -36,9 +36,14 @@ export async function POST(request: Request) {
     }
   }
 
-  await runTask(task);
+  const finalTask = await runTask(task);
+  if (finalTask) {
+    return NextResponse.json(finalTask);
+  }
 
+  // runTask only returns null in the rare case its own failure-recording
+  // UPDATE also failed — fall back to a fresh read so the caller still gets
+  // the task's real current state instead of a broken response.
   const { rows: finalRows } = await query<AgentTask>(`SELECT * FROM agent_tasks WHERE id = $1`, [task.id]);
-
   return NextResponse.json(finalRows[0]);
 }

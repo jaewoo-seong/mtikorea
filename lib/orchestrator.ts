@@ -114,7 +114,12 @@ async function planTask(task: AgentTask, stepNumber: number, maxTokens: number) 
   return { plan, tokens: result.totalTokens };
 }
 
-async function runDirect(task: AgentTask, org: Organization | undefined, maxTokens: number) {
+async function runDirect(
+  task: AgentTask,
+  org: Organization | undefined,
+  stepNumber: number,
+  maxTokens: number,
+) {
   const userText = [task.title, task.description].filter(Boolean).join("\n\n");
   const grounding = await getGroundingContext(userText);
   const system = buildSystemPrompt(org, !!grounding);
@@ -135,8 +140,8 @@ async function runDirect(task: AgentTask, org: Organization | undefined, maxToke
 
   await query(
     `INSERT INTO agent_work_log (task_id, step_number, phase, action, prompt_sent, response_file_path, duration_ms, tokens_used)
-     VALUES ($1, 1, 'orchestration', 'Run task', $2, $3, $4, $5)`,
-    [task.id, user, responsePath, durationMs, result.totalTokens],
+     VALUES ($1, $2, 'orchestration', 'Run task', $3, $4, $5, $6)`,
+    [task.id, stepNumber, user, responsePath, durationMs, result.totalTokens],
   );
 
   return { content: result.content, tokens: result.totalTokens, responsePath };
@@ -245,17 +250,28 @@ async function synthesize(
   return { content: result.content, tokens: result.totalTokens, responsePath };
 }
 
-export async function runTask(task: AgentTask): Promise<void> {
+export async function runTask(task: AgentTask): Promise<AgentTask | null> {
   const overallStart = Date.now();
-  const { rows: orgRows } = await query<Organization>(`SELECT * FROM organizations WHERE id = $1`, [
-    task.org_id,
-  ]);
-  const org = orgRows[0];
-
   let tokensSoFar = 0;
-  const remaining = () => Math.max(1, task.token_budget - task.tokens_used - tokensSoFar);
 
   try {
+    // Hard stop instead of the old floor-based maxTokens math, which let
+    // exhausted-budget tasks (e.g. a retried 'failed' task) keep spending —
+    // floors like `Math.max(200, ...)` guaranteed a non-trivial call even
+    // when the real remaining budget was ~0.
+    if (task.token_budget - task.tokens_used <= 0) {
+      throw new Error(
+        `Token budget already exhausted (${task.tokens_used}/${task.token_budget} used)`,
+      );
+    }
+
+    const { rows: orgRows } = await query<Organization>(`SELECT * FROM organizations WHERE id = $1`, [
+      task.org_id,
+    ]);
+    const org = orgRows[0];
+
+    const remaining = () => Math.max(1, task.token_budget - task.tokens_used - tokensSoFar);
+
     const { plan, tokens: planTokens } = await planTask(task, 1, Math.min(300, remaining()));
     tokensSoFar += planTokens;
 
@@ -269,13 +285,21 @@ export async function runTask(task: AgentTask): Promise<void> {
       );
       tokensSoFar += subResults.reduce((sum, r) => sum + r.tokens, 0);
 
+      const successCount = subResults.filter((r) => r.ok).length;
+      if (successCount === 0) {
+        // Don't synthesize (and bill another call for) nothing but failure
+        // placeholders, and don't mark the task 'completed' when zero real
+        // research happened.
+        throw new Error(`All ${subResults.length} sub-tasks failed`);
+      }
+
       const synthesisStep = plan.subtasks.length + 2;
       const synthesisResult = await synthesize(task, org, subResults, synthesisStep, Math.min(1200, remaining()));
       tokensSoFar += synthesisResult.tokens;
       finalContent = synthesisResult.content;
       responsePath = synthesisResult.responsePath;
     } else {
-      const direct = await runDirect(task, org, Math.min(MAX_TOKENS_PER_CALL, remaining()));
+      const direct = await runDirect(task, org, 2, Math.min(MAX_TOKENS_PER_CALL, remaining()));
       tokensSoFar += direct.tokens;
       finalContent = direct.content;
       responsePath = direct.responsePath;
@@ -287,26 +311,43 @@ export async function runTask(task: AgentTask): Promise<void> {
       [task.id, task.title, finalContent.slice(0, 500), responsePath],
     );
 
-    await query(
-      `UPDATE agent_tasks SET status = 'completed', completed_at = now(), tokens_used = tokens_used + $1 WHERE id = $2`,
+    const { rows: completedRows } = await query<AgentTask>(
+      `UPDATE agent_tasks SET status = 'completed', completed_at = now(), tokens_used = tokens_used + $1 WHERE id = $2 RETURNING *`,
       [tokensSoFar, task.id],
     );
+    return completedRows[0] ?? null;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const durationMs = Date.now() - overallStart;
-
-    await query(
-      `INSERT INTO agent_work_log (task_id, step_number, phase, action, duration_ms, tokens_used)
-       VALUES ($1, 1, 'orchestration', $2, $3, $4)`,
-      [task.id, `Failed: ${message.slice(0, 200)}`, durationMs, tokensSoFar],
-    );
-
-    await query(
-      `UPDATE agent_tasks SET status = 'failed', completed_at = now(), tokens_used = tokens_used + $1 WHERE id = $2`,
-      [tokensSoFar, task.id],
-    );
-
     console.error(`[orchestrator] task ${task.id} failed:`, message);
+
+    // Failure-recording is itself resilient: if the DB blip that caused the
+    // original failure is still ongoing, one of these two queries throwing
+    // must not leave the task stranded in 'running' forever. Try both
+    // independently rather than letting the first failure skip the second.
+    try {
+      await query(
+        `INSERT INTO agent_work_log (task_id, step_number, phase, action, duration_ms, tokens_used)
+         VALUES ($1, 1, 'orchestration', $2, $3, $4)`,
+        [task.id, `Failed: ${message.slice(0, 200)}`, durationMs, tokensSoFar],
+      );
+    } catch (logErr) {
+      console.error(`[orchestrator] failed to log failure for task ${task.id}:`, logErr);
+    }
+
+    try {
+      const { rows: failedRows } = await query<AgentTask>(
+        `UPDATE agent_tasks SET status = 'failed', completed_at = now(), tokens_used = tokens_used + $1 WHERE id = $2 RETURNING *`,
+        [tokensSoFar, task.id],
+      );
+      return failedRows[0] ?? null;
+    } catch (updateErr) {
+      console.error(
+        `[orchestrator] CRITICAL: could not mark task ${task.id} as failed — it may be stranded in 'running':`,
+        updateErr,
+      );
+      return null;
+    }
   }
 }
 

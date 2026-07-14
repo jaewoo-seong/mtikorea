@@ -1,4 +1,4 @@
-import { formatDateTime } from "@/lib/utils";
+import { emailTimestamp, formatDateTime } from "@/lib/utils";
 import type { Email } from "@/lib/types";
 
 export function LinkedEmailsSection({ emails }: { emails: Email[] }) {
@@ -14,7 +14,7 @@ export function LinkedEmailsSection({ emails }: { emails: Email[] }) {
           <p className="text-xs text-text-secondary">
             {email.direction === "sent" ? "To" : "From"}{" "}
             {email.direction === "sent" ? email.to_address : email.from_address} ·{" "}
-            {formatDateTime(email.received_at ?? email.sent_at ?? email.created_at)}
+            {formatDateTime(emailTimestamp(email))}
           </p>
         </li>
       ))}

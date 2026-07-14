@@ -28,6 +28,17 @@ export function truncate(text: string, maxLength: number) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
+// Emails only have one of received_at/sent_at set depending on direction,
+// with created_at as the final fallback — matches the sort order used by
+// GET /api/emails's COALESCE(...) ORDER BY.
+export function emailTimestamp(email: {
+  received_at: string | null;
+  sent_at: string | null;
+  created_at: string;
+}) {
+  return email.received_at ?? email.sent_at ?? email.created_at;
+}
+
 // Minimal RFC4180-ish CSV parser: handles quoted fields, embedded commas,
 // escaped quotes ("") and newlines inside quotes. Good enough for company
 // import/export without pulling in a dependency.
@@ -52,7 +63,10 @@ export function parseCsv(text: string): string[][] {
       continue;
     }
 
-    if (char === '"') {
+    if (char === '"' && field.length === 0) {
+      // Only treat a quote as opening a quoted field when it's the field's
+      // first character (RFC4180). A stray quote mid-field (e.g. 5' 2" tall)
+      // would otherwise silently swallow the rest of the row into one field.
       inQuotes = true;
     } else if (char === ",") {
       row.push(field);

@@ -1,6 +1,7 @@
 import { Button } from "@/components/common/Button";
+import { EmptyState } from "@/components/common/EmptyState";
 import { Icon } from "@/components/common/Icon";
-import { Spinner } from "@/components/common/Spinner";
+import { LoadingBlock } from "@/components/common/LoadingBlock";
 import { TaskCard } from "@/components/dashboard/TaskCard";
 import type { AgentTask } from "@/lib/types";
 
@@ -24,13 +25,9 @@ export function TaskQueue({ tasks, isLoading, selectedTaskId, onSelect, onCreate
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-8">
-          <Spinner />
-        </div>
+        <LoadingBlock />
       ) : tasks.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-text-secondary">
-          No tasks yet. Create one to get started.
-        </div>
+        <EmptyState>No tasks yet. Create one to get started.</EmptyState>
       ) : (
         <div className="space-y-2">
           {tasks.map((task) => (

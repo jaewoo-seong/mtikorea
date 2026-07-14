@@ -1,17 +1,8 @@
 import { type HTMLAttributes } from "react";
+import type { CompanyStatus, TaskStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type BadgeStatus =
-  | "running"
-  | "completed"
-  | "failed"
-  | "queued"
-  | "paused"
-  | "prospect"
-  | "lead"
-  | "customer"
-  | "inactive"
-  | "neutral";
+type BadgeStatus = TaskStatus | CompanyStatus | "neutral";
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   status?: BadgeStatus;

@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { COMPANY_STATUSES } from "@/lib/constants";
 import { query } from "@/lib/db";
 import type { Company, CompanyStatus } from "@/lib/types";
-
-const VALID_STATUSES: CompanyStatus[] = ["prospect", "lead", "customer", "inactive"];
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -16,7 +15,7 @@ export async function GET(request: Request) {
   const industry = searchParams.get("industry");
   const q = searchParams.get("q");
 
-  if (status && !VALID_STATUSES.includes(status as CompanyStatus)) {
+  if (status && !COMPANY_STATUSES.includes(status as CompanyStatus)) {
     return NextResponse.json({ error: "Invalid status filter" }, { status: 400 });
   }
 
@@ -37,7 +36,7 @@ export async function GET(request: Request) {
   }
 
   const { rows } = await query<Company>(
-    `SELECT * FROM companies WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`,
+    `SELECT * FROM companies WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC LIMIT 500`,
     params,
   );
 
@@ -56,7 +55,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
   const status = typeof body?.status === "string" ? body.status : "prospect";
-  if (!VALID_STATUSES.includes(status as CompanyStatus)) {
+  if (!COMPANY_STATUSES.includes(status as CompanyStatus)) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 

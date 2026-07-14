@@ -1,4 +1,5 @@
 const TAVILY_URL = "https://api.tavily.com/search";
+const REQUEST_TIMEOUT_MS = 20_000;
 
 export interface TavilyResult {
   title: string;
@@ -25,6 +26,7 @@ export async function search(query: string, maxResults = 4): Promise<TavilyResul
       search_depth: "basic",
       max_results: maxResults,
     }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {

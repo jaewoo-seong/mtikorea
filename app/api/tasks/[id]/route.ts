@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { TASK_STATUSES } from "@/lib/constants";
 import { query } from "@/lib/db";
 import type { AgentTask, TaskStatus } from "@/lib/types";
-
-const VALID_STATUSES: TaskStatus[] = ["queued", "running", "paused", "completed", "failed"];
 
 async function getOwnedTask(id: string, orgId: string) {
   const { rows } = await query<AgentTask>(`SELECT * FROM agent_tasks WHERE id = $1 AND org_id = $2`, [
@@ -46,7 +45,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const nextStatus: TaskStatus | undefined = body.status;
-  if (nextStatus && !VALID_STATUSES.includes(nextStatus)) {
+  if (nextStatus && !TASK_STATUSES.includes(nextStatus)) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 

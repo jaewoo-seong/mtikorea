@@ -1,4 +1,4 @@
-import { cn, formatDateTime } from "@/lib/utils";
+import { cn, emailTimestamp, formatDateTime } from "@/lib/utils";
 import type { Email } from "@/lib/types";
 
 interface EmailRowProps {
@@ -24,7 +24,7 @@ export function EmailRow({ email, selected, onClick }: EmailRowProps) {
           {counterparty || "(unknown)"}
         </span>
         <span className="shrink-0 text-xs text-text-secondary">
-          {formatDateTime(email.received_at ?? email.sent_at ?? email.created_at)}
+          {formatDateTime(emailTimestamp(email))}
         </span>
       </div>
       <span className="truncate text-sm text-text-secondary">{email.subject || "(no subject)"}</span>

@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { TASK_STATUSES } from "@/lib/constants";
 import { query } from "@/lib/db";
 import type { AgentTask, TaskStatus } from "@/lib/types";
-
-const VALID_STATUSES: TaskStatus[] = ["queued", "running", "paused", "completed", "failed"];
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -13,14 +12,21 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
-  if (status && !VALID_STATUSES.includes(status as TaskStatus)) {
+  if (status && !TASK_STATUSES.includes(status as TaskStatus)) {
     return NextResponse.json({ error: "Invalid status filter" }, { status: 400 });
   }
 
+  // The dashboard list view never renders global_context/task_context/
+  // task_checkpoint (large JSONB blobs only consumed internally by the
+  // orchestrator) — omit them here to keep the list payload small.
+  const listColumns = `id, org_id, company_id, title, description, status, priority,
+    created_by, created_at, started_at, completed_at, paused_at,
+    token_budget, tokens_used, estimated_cost`;
+
   const { rows } = await query<AgentTask>(
     status
-      ? `SELECT * FROM agent_tasks WHERE org_id = $1 AND status = $2 ORDER BY created_at DESC`
-      : `SELECT * FROM agent_tasks WHERE org_id = $1 ORDER BY created_at DESC`,
+      ? `SELECT ${listColumns} FROM agent_tasks WHERE org_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT 200`
+      : `SELECT ${listColumns} FROM agent_tasks WHERE org_id = $1 ORDER BY created_at DESC LIMIT 200`,
     status ? [session.user.orgId, status] : [session.user.orgId],
   );
 

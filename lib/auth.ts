@@ -5,7 +5,14 @@ import { query } from "@/lib/db";
 
 const DEFAULT_ORG_NAME = "MTI Technology";
 const DEFAULT_ORG_SLUG = "mti";
-const isDev = process.env.NODE_ENV !== "production";
+// Requires BOTH conditions, not just NODE_ENV !== "production" — `next start`
+// only defaults NODE_ENV to "production" when it's unset; an explicit
+// non-production value (e.g. NODE_ENV=staging on a reachable Railway
+// environment, inherited from a shared variable group) would leave the old
+// single-condition check registering an unauthenticated login bypass on a
+// public deployment. ALLOW_DEV_LOGIN must be deliberately set too, and should
+// never be set anywhere but true local dev.
+const isDev = process.env.NODE_ENV !== "production" && process.env.ALLOW_DEV_LOGIN === "true";
 
 // Single-tenant for now — no multi-org onboarding UI exists, so every user
 // lands in the same default org. INSERT ... ON CONFLICT DO UPDATE (a no-op
@@ -22,6 +29,16 @@ async function ensureDefaultOrg() {
   return rows[0].id;
 }
 
+// The JWT session strategy stamps `role` onto the token only at sign-in —
+// it does NOT get updated on every request. A user demoted from admin keeps
+// a session that still says role: 'admin' until they sign out/in again or
+// the session expires. Admin-gated routes should call this instead of
+// trusting `session.user.role` directly.
+export async function isCurrentAdmin(userId: string): Promise<boolean> {
+  const { rows } = await query<{ role: string }>(`SELECT role FROM users WHERE id = $1`, [userId]);
+  return rows[0]?.role === "admin";
+}
+
 // Dev-only sign-in that skips the Google OAuth round-trip so the app can be
 // tested locally before Google Cloud billing / OAuth credentials are set up.
 // Registered only when NODE_ENV !== "production" — cannot exist in a
@@ -36,6 +53,13 @@ const devCredentialsProvider = Credentials({
 });
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Railway (like most non-Vercel hosts) terminates TLS at its edge and
+  // forwards over HTTP with X-Forwarded-* headers. Without trustHost, Auth.js
+  // refuses to trust that forwarded host/proto, which on the proxy.ts
+  // middleware path manifests as an infinite redirect loop rather than a
+  // clean error — every request re-derives an inconsistent origin and
+  // re-redirects. Safe to trust here since Railway's edge is the only way in.
+  trustHost: true,
   providers: isDev ? [Google, devCredentialsProvider] : [Google],
   session: { strategy: "jwt" },
   pages: {

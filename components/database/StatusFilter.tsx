@@ -1,12 +1,11 @@
 import { Select } from "@/components/common/Input";
+import { COMPANY_STATUS_OPTIONS } from "@/lib/constants";
 import type { CompanyStatus } from "@/lib/types";
 
 interface StatusFilterProps {
   value: CompanyStatus | "";
   onChange: (value: CompanyStatus | "") => void;
 }
-
-const STATUSES: CompanyStatus[] = ["prospect", "lead", "customer", "inactive"];
 
 export function StatusFilter({ value, onChange }: StatusFilterProps) {
   return (
@@ -16,9 +15,9 @@ export function StatusFilter({ value, onChange }: StatusFilterProps) {
       className="w-40"
     >
       <option value="">All statuses</option>
-      {STATUSES.map((status) => (
-        <option key={status} value={status} className="capitalize">
-          {status}
+      {COMPANY_STATUS_OPTIONS.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {opt.label}
         </option>
       ))}
     </Select>

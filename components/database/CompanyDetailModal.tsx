@@ -1,21 +1,15 @@
 "use client";
 
 import { Badge } from "@/components/common/Badge";
+import { LoadingBlock } from "@/components/common/LoadingBlock";
 import { Modal } from "@/components/common/Modal";
-import { Spinner } from "@/components/common/Spinner";
 import { AuditTrail } from "@/components/database/AuditTrail";
 import { EditableCell } from "@/components/database/EditableCell";
 import { LinkedEmailsSection } from "@/components/database/LinkedEmailsSection";
 import { LinkedTasksSection } from "@/components/database/LinkedTasksSection";
+import { COMPANY_STATUS_OPTIONS } from "@/lib/constants";
 import { useCompany, useUpdateCompany } from "@/lib/hooks";
 import type { Company, CompanyStatus } from "@/lib/types";
-
-const STATUS_OPTIONS: { value: CompanyStatus; label: string }[] = [
-  { value: "prospect", label: "Prospect" },
-  { value: "lead", label: "Lead" },
-  { value: "customer", label: "Customer" },
-  { value: "inactive", label: "Inactive" },
-];
 
 const FIELD_LABELS: [keyof Company, string][] = [
   ["korean_name", "Korean Name"],
@@ -41,16 +35,14 @@ export function CompanyDetailModal({ companyId, onClose }: CompanyDetailModalPro
   return (
     <Modal open onClose={onClose} title={company?.name ?? "Company"} variant="sidebar">
       {isLoading || !company ? (
-        <div className="flex justify-center py-8">
-          <Spinner />
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="space-y-6">
           <div>
             <div className="mb-3 flex items-center gap-2">
               <EditableCell
                 variant="select"
-                options={STATUS_OPTIONS}
+                options={COMPANY_STATUS_OPTIONS}
                 value={company.status}
                 onSave={(v) => save("status", v)}
                 renderDisplay={(v) => <Badge status={(v as CompanyStatus) ?? "prospect"}>{v}</Badge>}

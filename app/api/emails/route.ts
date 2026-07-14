@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getPool, query } from "@/lib/db";
 import { emailBodyPath, findCompanyIdByAddress } from "@/lib/emails";
-import { writeStorageFile } from "@/lib/fileStorage";
+import { deleteStorageFile, writeStorageFile } from "@/lib/fileStorage";
 import type { Email } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -17,8 +18,8 @@ export async function GET(request: Request) {
 
   const { rows } = await query<Email>(
     direction
-      ? `SELECT * FROM emails WHERE org_id = $1 AND direction = $2 ORDER BY COALESCE(received_at, sent_at, created_at) DESC`
-      : `SELECT * FROM emails WHERE org_id = $1 ORDER BY COALESCE(received_at, sent_at, created_at) DESC`,
+      ? `SELECT * FROM emails WHERE org_id = $1 AND direction = $2 ORDER BY COALESCE(received_at, sent_at, created_at) DESC LIMIT 500`
+      : `SELECT * FROM emails WHERE org_id = $1 ORDER BY COALESCE(received_at, sent_at, created_at) DESC LIMIT 500`,
     direction ? [session.user.orgId, direction] : [session.user.orgId],
   );
 
@@ -40,10 +41,23 @@ export async function POST(request: Request) {
   }
 
   const fromAddress = session.user.email ?? "";
-  const companyId =
-    typeof body?.company_id === "string" && body.company_id
-      ? body.company_id
-      : await findCompanyIdByAddress(session.user.orgId, to);
+  let companyId: string | null = null;
+  if (typeof body?.company_id === "string" && body.company_id) {
+    const { rows } = await query<{ id: string }>(
+      `SELECT id FROM companies WHERE id = $1 AND org_id = $2`,
+      [body.company_id, session.user.orgId],
+    );
+    if (rows.length === 0) {
+      return NextResponse.json({ error: "Invalid company_id" }, { status: 400 });
+    }
+    companyId = rows[0].id;
+  } else {
+    companyId = await findCompanyIdByAddress(session.user.orgId, to);
+  }
+
+  const emailId = randomUUID();
+  const bodyPath = emailBodyPath(session.user.orgId, emailId);
+  await writeStorageFile(bodyPath, content);
 
   const client = await getPool().connect();
   try {
@@ -58,10 +72,10 @@ export async function POST(request: Request) {
     const threadId = threadRows[0].id;
 
     const { rows: emailRows } = await client.query<Email>(
-      `INSERT INTO emails (org_id, company_id, thread_id, from_address, to_address, subject, direction, sent_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'sent', now())
+      `INSERT INTO emails (id, org_id, company_id, thread_id, from_address, to_address, subject, direction, sent_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'sent', now())
        RETURNING *`,
-      [session.user.orgId, companyId, threadId, fromAddress, to, subject],
+      [emailId, session.user.orgId, companyId, threadId, fromAddress, to, subject],
     );
     const email = emailRows[0];
 
@@ -72,11 +86,10 @@ export async function POST(request: Request) {
 
     await client.query("COMMIT");
 
-    await writeStorageFile(emailBodyPath(session.user.orgId, email.id), content);
-
     return NextResponse.json(email, { status: 201 });
   } catch (err) {
     await client.query("ROLLBACK");
+    await deleteStorageFile(bodyPath).catch(() => {});
     throw err;
   } finally {
     client.release();

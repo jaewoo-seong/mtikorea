@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { COMPANY_STATUSES } from "@/lib/constants";
 import { getPool, query } from "@/lib/db";
-import type { AgentTask, Company, CompanyStatus, Email } from "@/lib/types";
+import type { AgentTask, Company, Email } from "@/lib/types";
 
-const VALID_STATUSES: CompanyStatus[] = ["prospect", "lead", "customer", "inactive"];
 const EDITABLE_FIELDS = [
   "name",
   "korean_name",
@@ -36,10 +36,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
 
   const [{ rows: linkedEmails }, { rows: linkedTasks }] = await Promise.all([
-    query<Email>(`SELECT * FROM emails WHERE company_id = $1 ORDER BY created_at DESC LIMIT 20`, [id]),
-    query<AgentTask>(`SELECT * FROM agent_tasks WHERE company_id = $1 ORDER BY created_at DESC LIMIT 20`, [
-      id,
-    ]),
+    query<Email>(
+      `SELECT * FROM emails WHERE company_id = $1 AND org_id = $2 ORDER BY created_at DESC LIMIT 20`,
+      [id, session.user.orgId],
+    ),
+    query<AgentTask>(
+      `SELECT * FROM agent_tasks WHERE company_id = $1 AND org_id = $2 ORDER BY created_at DESC LIMIT 20`,
+      [id, session.user.orgId],
+    ),
   ]);
 
   return NextResponse.json({ ...company, linked_emails: linkedEmails, linked_tasks: linkedTasks });
@@ -56,8 +60,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
-  if (body.status && !VALID_STATUSES.includes(body.status)) {
+  if ("status" in body && !COMPANY_STATUSES.includes(body.status)) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+  }
+  if ("name" in body && (typeof body.name !== "string" || !body.name.trim())) {
+    return NextResponse.json({ error: "name cannot be empty" }, { status: 400 });
   }
 
   const client = await getPool().connect();
@@ -120,13 +127,24 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   }
 
   const { id } = await params;
-  const { rowCount } = await query(`DELETE FROM companies WHERE id = $1 AND org_id = $2`, [
-    id,
-    session.user.orgId,
-  ]);
-  if (rowCount === 0) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+  try {
+    const { rowCount } = await query(`DELETE FROM companies WHERE id = $1 AND org_id = $2`, [
+      id,
+      session.user.orgId,
+    ]);
+    if (rowCount === 0) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
 
-  return new NextResponse(null, { status: 204 });
+    return new NextResponse(null, { status: 204 });
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === "23503") {
+      return NextResponse.json(
+        { error: "Cannot delete company: it still has linked records" },
+        { status: 409 },
+      );
+    }
+    throw err;
+  }
 }

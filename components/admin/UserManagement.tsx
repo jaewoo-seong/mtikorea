@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { Spinner } from "@/components/common/Spinner";
+import { LoadingBlock } from "@/components/common/LoadingBlock";
 import { Table } from "@/components/common/Table";
 import { UserRow } from "@/components/admin/UserRow";
 import { useAdminUsers, useUpdateUserRole } from "@/lib/hooks";
@@ -10,28 +9,22 @@ import type { UserRole } from "@/lib/types";
 export function UserManagement() {
   const { data: users = [], isLoading } = useAdminUsers();
   const updateRole = useUpdateUserRole();
-  const [error, setError] = useState<string | null>(null);
 
-  async function handleRoleChange(id: string, role: UserRole) {
-    setError(null);
-    try {
-      await updateRole.mutateAsync({ id, role });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update role");
-    }
+  function handleRoleChange(id: string, role: UserRole) {
+    updateRole.mutate({ id, role });
   }
 
   if (isLoading) {
-    return (
-      <div className="flex justify-center py-8">
-        <Spinner />
-      </div>
-    );
+    return <LoadingBlock />;
   }
 
   return (
     <div>
-      {error && <p className="mb-3 text-sm text-danger">{error}</p>}
+      {updateRole.isError && (
+        <p className="mb-3 text-sm text-danger">
+          {(updateRole.error as Error).message || "Failed to update role"}
+        </p>
+      )}
       <Table>
         <Table.Header>
           <Table.Row>

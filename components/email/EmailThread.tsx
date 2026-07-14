@@ -1,4 +1,4 @@
-import { formatDateTime } from "@/lib/utils";
+import { emailTimestamp, formatDateTime } from "@/lib/utils";
 import type { EmailWithBody } from "@/lib/types";
 
 export function EmailThread({ emails }: { emails: EmailWithBody[] }) {
@@ -13,7 +13,7 @@ export function EmailThread({ emails }: { emails: EmailWithBody[] }) {
             <span>
               <span className="font-medium text-text">{email.from_address}</span> → {email.to_address}
             </span>
-            <span>{formatDateTime(email.received_at ?? email.sent_at ?? email.created_at)}</span>
+            <span>{formatDateTime(emailTimestamp(email))}</span>
           </div>
           <p className="whitespace-pre-wrap text-sm text-text">{email.body || "(no content)"}</p>
         </div>

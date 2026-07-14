@@ -1,4 +1,4 @@
-import { Spinner } from "@/components/common/Spinner";
+import { LoadingBlock } from "@/components/common/LoadingBlock";
 import { EmailRow } from "@/components/email/EmailRow";
 import type { Email } from "@/lib/types";
 
@@ -11,11 +11,7 @@ interface EmailListProps {
 
 export function EmailList({ emails, isLoading, selectedEmailId, onSelect }: EmailListProps) {
   if (isLoading) {
-    return (
-      <div className="flex justify-center py-8">
-        <Spinner />
-      </div>
-    );
+    return <LoadingBlock />;
   }
 
   if (emails.length === 0) {

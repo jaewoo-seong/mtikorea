@@ -27,11 +27,13 @@ export function EditableCell({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const initialValue = useRef(value ?? "");
 
   function startEdit() {
     initialValue.current = value ?? "";
     setDraft(value ?? "");
+    setError(null);
     setEditing(true);
   }
 
@@ -39,8 +41,12 @@ export function EditableCell({
     setEditing(false);
     if (draft === initialValue.current) return;
     setSaving(true);
+    setError(null);
     try {
       await onSave(draft);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+      setDraft(initialValue.current);
     } finally {
       setSaving(false);
     }
@@ -83,19 +89,22 @@ export function EditableCell({
   }
 
   return (
-    <button
-      type="button"
-      onClick={startEdit}
-      disabled={saving}
-      className={cn(
-        "w-full rounded px-2 py-1 text-left text-sm text-text transition-colors duration-150",
-        "hover:bg-background hover:ring-1 hover:ring-border",
-        saving && "opacity-50",
-        !value && !renderDisplay && "text-text-secondary",
-        className,
-      )}
-    >
-      {renderDisplay ? renderDisplay(value) : value || placeholder}
-    </button>
+    <div className="w-full">
+      <button
+        type="button"
+        onClick={startEdit}
+        disabled={saving}
+        className={cn(
+          "w-full rounded px-2 py-1 text-left text-sm text-text transition-colors duration-150",
+          "hover:bg-background hover:ring-1 hover:ring-border",
+          saving && "opacity-50",
+          !value && !renderDisplay && "text-text-secondary",
+          className,
+        )}
+      >
+        {renderDisplay ? renderDisplay(value) : value || placeholder}
+      </button>
+      {error && <p className="px-2 text-xs text-danger">{error}</p>}
+    </div>
   );
 }

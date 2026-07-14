@@ -2,14 +2,8 @@ import { Avatar } from "@/components/common/Avatar";
 import { Badge } from "@/components/common/Badge";
 import { Table } from "@/components/common/Table";
 import { EditableCell } from "@/components/database/EditableCell";
+import { COMPANY_STATUS_OPTIONS } from "@/lib/constants";
 import type { Company, CompanyStatus } from "@/lib/types";
-
-const STATUS_OPTIONS: { value: CompanyStatus; label: string }[] = [
-  { value: "prospect", label: "Prospect" },
-  { value: "lead", label: "Lead" },
-  { value: "customer", label: "Customer" },
-  { value: "inactive", label: "Inactive" },
-];
 
 interface CompanyRowProps {
   company: Company;
@@ -45,7 +39,7 @@ export function CompanyRow({ company, onFieldSave, onOpenDetail }: CompanyRowPro
       <Table.Cell editable className="w-32">
         <EditableCell
           variant="select"
-          options={STATUS_OPTIONS}
+          options={COMPANY_STATUS_OPTIONS}
           value={company.status}
           onSave={(v) => onFieldSave("status", v)}
           renderDisplay={(v) => <Badge status={(v as CompanyStatus) ?? "prospect"}>{v}</Badge>}

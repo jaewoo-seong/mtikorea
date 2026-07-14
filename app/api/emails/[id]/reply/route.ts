@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getPool, query } from "@/lib/db";
 import { emailBodyPath } from "@/lib/emails";
-import { writeStorageFile } from "@/lib/fileStorage";
+import { deleteStorageFile, writeStorageFile } from "@/lib/fileStorage";
 import type { Email } from "@/lib/types";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -31,15 +32,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const toAddress = original.direction === "sent" ? original.to_address : original.from_address;
   const subject = original.subject?.startsWith("Re:") ? original.subject : `Re: ${original.subject ?? ""}`;
 
+  const replyId = randomUUID();
+  const bodyPath = emailBodyPath(session.user.orgId, replyId);
+  await writeStorageFile(bodyPath, content);
+
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
 
     const { rows: emailRows } = await client.query<Email>(
-      `INSERT INTO emails (org_id, company_id, thread_id, from_address, to_address, subject, direction, sent_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'sent', now())
+      `INSERT INTO emails (id, org_id, company_id, thread_id, from_address, to_address, subject, direction, sent_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'sent', now())
        RETURNING *`,
-      [session.user.orgId, original.company_id, original.thread_id, fromAddress, toAddress, subject],
+      [replyId, session.user.orgId, original.company_id, original.thread_id, fromAddress, toAddress, subject],
     );
     const reply = emailRows[0];
 
@@ -52,11 +57,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     await client.query("COMMIT");
 
-    await writeStorageFile(emailBodyPath(session.user.orgId, reply.id), content);
-
     return NextResponse.json(reply, { status: 201 });
   } catch (err) {
     await client.query("ROLLBACK");
+    await deleteStorageFile(bodyPath).catch(() => {});
     throw err;
   } finally {
     client.release();

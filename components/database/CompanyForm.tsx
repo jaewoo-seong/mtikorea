@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/common/Button";
 import { Input, Select, Textarea } from "@/components/common/Input";
 import { Modal } from "@/components/common/Modal";
+import { COMPANY_STATUS_OPTIONS } from "@/lib/constants";
 import { useCreateCompany } from "@/lib/hooks";
 import type { CompanyStatus } from "@/lib/types";
 
@@ -90,10 +91,11 @@ export function CompanyForm({ open, onClose, onCreated }: CompanyFormProps) {
               value={fields.status}
               onChange={(e) => set("status", e.target.value as CompanyStatus)}
             >
-              <option value="prospect">Prospect</option>
-              <option value="lead">Lead</option>
-              <option value="customer">Customer</option>
-              <option value="inactive">Inactive</option>
+              {COMPANY_STATUS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </Select>
           </div>
           <div>

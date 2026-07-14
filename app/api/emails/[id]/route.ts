@@ -38,14 +38,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   const [thread, threadEmailsRaw, notes] = await Promise.all([
     email.thread_id
-      ? query<EmailThread>(`SELECT * FROM email_threads WHERE id = $1`, [email.thread_id]).then(
-          (r) => r.rows[0] ?? null,
-        )
+      ? query<EmailThread>(`SELECT * FROM email_threads WHERE id = $1 AND org_id = $2`, [
+          email.thread_id,
+          session.user.orgId,
+        ]).then((r) => r.rows[0] ?? null)
       : Promise.resolve(null),
     email.thread_id
-      ? query<Email>(`SELECT * FROM emails WHERE thread_id = $1 ORDER BY created_at ASC`, [
-          email.thread_id,
-        ]).then((r) => r.rows)
+      ? query<Email>(
+          `SELECT * FROM emails WHERE thread_id = $1 AND org_id = $2 ORDER BY created_at ASC`,
+          [email.thread_id, session.user.orgId],
+        ).then((r) => r.rows)
       : Promise.resolve([email]),
     query<EmailInternalNote>(`SELECT * FROM email_internal_notes WHERE email_id = $1 ORDER BY created_at ASC`, [
       id,

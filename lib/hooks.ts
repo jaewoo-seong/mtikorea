@@ -28,15 +28,38 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-function hasRunningTask(tasks: AgentTask[] | undefined) {
-  return (tasks ?? []).some((t) => t.status === "running");
+function jsonBody(url: string, method: "POST" | "PATCH", body: unknown) {
+  return fetchJson(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+function postJson<T>(url: string, body: unknown): Promise<T> {
+  return jsonBody(url, "POST", body) as Promise<T>;
+}
+
+function patchJson<T>(url: string, body: unknown): Promise<T> {
+  return jsonBody(url, "PATCH", body) as Promise<T>;
+}
+
+// "queued" tasks haven't been picked up by the orchestrator's poll loop yet
+// — they still need polling to observe the queued -> running transition, not
+// just running -> completed/failed.
+function isActiveStatus(status: TaskStatus | undefined) {
+  return status === "queued" || status === "running";
+}
+
+function hasActiveTask(tasks: AgentTask[] | undefined) {
+  return (tasks ?? []).some((t) => isActiveStatus(t.status));
 }
 
 export function useTaskSubscription() {
   return useQuery<AgentTask[]>({
     queryKey: ["tasks"],
     queryFn: () => fetchJson<AgentTask[]>("/api/tasks"),
-    refetchInterval: (query) => (hasRunningTask(query.state.data) ? RUNNING_POLL_MS : false),
+    refetchInterval: (query) => (hasActiveTask(query.state.data) ? RUNNING_POLL_MS : false),
   });
 }
 
@@ -45,7 +68,7 @@ export function useTask(taskId: string | null) {
     queryKey: ["task", taskId],
     queryFn: () => fetchJson<AgentTask>(`/api/tasks/${taskId}`),
     enabled: !!taskId,
-    refetchInterval: (query) => (query.state.data?.status === "running" ? RUNNING_POLL_MS : false),
+    refetchInterval: (query) => (isActiveStatus(query.state.data?.status) ? RUNNING_POLL_MS : false),
   });
 }
 
@@ -54,7 +77,7 @@ export function useTaskLogs(taskId: string | null, status?: TaskStatus) {
     queryKey: ["task", taskId, "logs"],
     queryFn: () => fetchJson<AgentWorkLogEntryWithResponse[]>(`/api/tasks/${taskId}/logs`),
     enabled: !!taskId,
-    refetchInterval: status === "running" ? RUNNING_POLL_MS : false,
+    refetchInterval: isActiveStatus(status) ? RUNNING_POLL_MS : false,
   });
 }
 
@@ -66,12 +89,7 @@ export function useCreateTask() {
       description?: string;
       priority?: string;
       company_id?: string;
-    }) =>
-      fetchJson<AgentTask>("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      }),
+    }) => postJson<AgentTask>("/api/tasks", input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
@@ -82,11 +100,7 @@ export function useUpdateTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...input }: { id: string; status?: TaskStatus }) =>
-      fetchJson<AgentTask>(`/api/tasks/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      }),
+      patchJson<AgentTask>(`/api/tasks/${id}`, input),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       queryClient.invalidateQueries({ queryKey: ["task", variables.id] });
@@ -142,12 +156,7 @@ type CompanyInput = Partial<
 export function useCreateCompany() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CompanyInput) =>
-      fetchJson<Company>("/api/companies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      }),
+    mutationFn: (input: CompanyInput) => postJson<Company>("/api/companies", input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
     },
@@ -158,11 +167,7 @@ export function useUpdateCompany() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...input }: CompanyInput & { id: string }) =>
-      fetchJson<Company>(`/api/companies/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      }),
+      patchJson<Company>(`/api/companies/${id}`, input),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
       queryClient.invalidateQueries({ queryKey: ["company", variables.id] });
@@ -171,30 +176,13 @@ export function useUpdateCompany() {
   });
 }
 
-export function useDeleteCompany() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/companies/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["companies"] });
-    },
-  });
-}
-
 export function useImportCompaniesCsv() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (csv: string) =>
-      fetchJson<{ imported: number; errors: { row: number; error: string }[] }>(
+      postJson<{ imported: number; errors: { row: number; error: string }[] }>(
         "/api/companies/import",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ csv }),
-        },
+        { csv },
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
@@ -221,11 +209,7 @@ export function useSendEmail() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { to: string; subject: string; body: string; company_id?: string }) =>
-      fetchJson<Email>("/api/emails", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      }),
+      postJson<Email>("/api/emails", input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["emails"] });
     },
@@ -236,11 +220,7 @@ export function useReplyToEmail() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: string }) =>
-      fetchJson<Email>(`/api/emails/${id}/reply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body }),
-      }),
+      postJson<Email>(`/api/emails/${id}/reply`, { body }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["emails"] });
       queryClient.invalidateQueries({ queryKey: ["email", variables.id] });
@@ -252,11 +232,7 @@ export function useAddInternalNote() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, note }: { id: string; note: string }) =>
-      fetchJson<EmailInternalNote>(`/api/emails/${id}/note`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note }),
-      }),
+      postJson<EmailInternalNote>(`/api/emails/${id}/note`, { note }),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["email", variables.id] });
     },
@@ -266,11 +242,7 @@ export function useAddInternalNote() {
 export function useSuggestReply() {
   return useMutation({
     mutationFn: (emailId: string) =>
-      fetchJson<{ suggestion: string }>("/api/emails/suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailId }),
-      }),
+      postJson<{ suggestion: string }>("/api/emails/suggest", { emailId }),
   });
 }
 
@@ -285,11 +257,7 @@ export function useUpdateUserRole() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, role }: { id: string; role: UserRole }) =>
-      fetchJson<User>(`/api/admin/users/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role }),
-      }),
+      patchJson<User>(`/api/admin/users/${id}`, { role }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
     },
@@ -306,12 +274,7 @@ export function useOrganization() {
 export function useUpdateOrganization() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) =>
-      fetchJson<Organization>("/api/admin/organization", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      }),
+    mutationFn: (name: string) => patchJson<Organization>("/api/admin/organization", { name }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "organization"] });
     },

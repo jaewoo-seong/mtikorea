@@ -2,7 +2,7 @@
 
 import { Badge } from "@/components/common/Badge";
 import { Button } from "@/components/common/Button";
-import { Spinner } from "@/components/common/Spinner";
+import { LoadingBlock } from "@/components/common/LoadingBlock";
 import { TaskProgressBar } from "@/components/dashboard/TaskProgressBar";
 import { WorkLog } from "@/components/dashboard/WorkLog";
 import { useTask, useTaskLogs, useUpdateTask } from "@/lib/hooks";
@@ -14,11 +14,7 @@ export function TaskDetailPanel({ taskId }: { taskId: string }) {
   const updateTask = useUpdateTask();
 
   if (isLoading || !task) {
-    return (
-      <div className="flex justify-center py-8">
-        <Spinner />
-      </div>
-    );
+    return <LoadingBlock />;
   }
 
   return (

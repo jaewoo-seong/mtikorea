@@ -22,7 +22,7 @@ export const STORAGE_ROOT = resolveStorageRoot();
 
 function resolvePath(relativePath: string) {
   const resolved = path.resolve(/* turbopackIgnore: true */ STORAGE_ROOT, relativePath);
-  if (!resolved.startsWith(STORAGE_ROOT)) {
+  if (resolved !== STORAGE_ROOT && !resolved.startsWith(STORAGE_ROOT + path.sep)) {
     throw new Error(`Path escapes storage root: ${relativePath}`);
   }
   return resolved;
