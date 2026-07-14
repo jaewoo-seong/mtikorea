@@ -1,9 +1,10 @@
 /**
- * Advances one claimed project. Re-claims via status checks so Stop is respected.
- * Uses OpenRouter when key present; otherwise deterministic local progress (still token-accounted).
+ * Advances one claimed project. Respects Stop, token budget, allotted hours, and due dates.
  */
+const { projectProgress } = require('../../backend/src/lib/projectProgress');
+const { saveBuffer } = require('../../backend/src/lib/storage');
 
-async function runProjectStep(pool, project, workerId) {
+async function runProjectStep(pool, project) {
   const client = await pool.connect();
   try {
     const fresh = await client.query(
@@ -13,10 +14,42 @@ async function runProjectStep(pool, project, workerId) {
     if (!fresh.rows[0]) return;
 
     const p = fresh.rows[0];
+    const now = new Date();
+
+    if (p.due_at && now > new Date(p.due_at)) {
+      await client.query(
+        `UPDATE projects SET status = 'paused', stopped_at = now(), claimed_by = NULL,
+           progress_pct = $2, updated_at = now() WHERE id = $1`,
+        [p.id, projectProgress(p, now).progressPct]
+      );
+      await log(client, p.id, 'control', 'deadline', 'Due date reached — worker paused project', 0);
+      return;
+    }
+
+    if (p.allotted_hours && p.started_at) {
+      const elapsedH = (now.getTime() - new Date(p.started_at).getTime()) / (1000 * 60 * 60);
+      if (elapsedH >= Number(p.allotted_hours)) {
+        await client.query(
+          `UPDATE projects SET status = 'paused', stopped_at = now(), claimed_by = NULL,
+             progress_pct = 100, updated_at = now() WHERE id = $1`,
+          [p.id]
+        );
+        await log(
+          client,
+          p.id,
+          'control',
+          'hours_exhausted',
+          `Allotted ${p.allotted_hours}h reached — worker paused project`,
+          0
+        );
+        return;
+      }
+    }
+
     if (p.tokens_used >= p.token_budget) {
       await client.query(
-        `UPDATE projects SET status = 'completed', completed_at = now(), claimed_by = NULL, updated_at = now()
-         WHERE id = $1`,
+        `UPDATE projects SET status = 'completed', completed_at = now(), claimed_by = NULL,
+           progress_pct = 100, updated_at = now() WHERE id = $1`,
         [p.id]
       );
       await log(client, p.id, 'control', 'budget_exhausted', 'Token budget reached', 0);
@@ -35,15 +68,22 @@ async function runProjectStep(pool, project, workerId) {
 
     await log(client, p.id, phase, action, detail, tokens, duration, step);
 
+    const updated = {
+      ...p,
+      tokens_used: Number(p.tokens_used) + tokens,
+    };
+    const metrics = projectProgress(updated, new Date());
+
     await client.query(
       `UPDATE projects SET
          tokens_used = tokens_used + $2,
-         checkpoint = jsonb_set(COALESCE(checkpoint, '{}'::jsonb), '{last_step}', to_jsonb($3::int), true),
+         progress_pct = $3,
+         checkpoint = jsonb_set(COALESCE(checkpoint, '{}'::jsonb), '{last_step}', to_jsonb($4::int), true),
          claimed_by = NULL,
          claimed_at = NULL,
          updated_at = now()
        WHERE id = $1 AND status = 'running'`,
-      [p.id, tokens, step]
+      [p.id, tokens, metrics.progressPct, step]
     );
 
     if (summary) {
@@ -52,16 +92,39 @@ async function runProjectStep(pool, project, workerId) {
          VALUES ($1, 'progress', $2, $3, 0.6)`,
         [p.id, `Step ${step}`, summary]
       );
+
+      if (step % 3 === 0) {
+        const saved = saveBuffer(
+          `projects/${p.id}`,
+          `report-step-${step}.txt`,
+          Buffer.from(summary, 'utf8')
+        );
+        await client.query(
+          `INSERT INTO shared_documents (
+             org_id, client_id, project_id, title, description, filename, mime_type, size_bytes, storage_path, uploaded_by
+           ) VALUES ($1,$2,$3,$4,$5,$6,'text/plain',$7,$8,NULL)`,
+          [
+            p.org_id,
+            p.client_id,
+            p.id,
+            `Worker report · step ${step}`,
+            summary.slice(0, 500),
+            `report-step-${step}.txt`,
+            saved.size,
+            saved.storagePath,
+          ]
+        );
+      }
     }
 
-    // Auto-complete after enough steps if goal looks satisfied (heuristic)
-    if (step >= 12) {
+    if (metrics.progressPct >= 100) {
       await client.query(
-        `UPDATE projects SET status = 'completed', completed_at = now(), claimed_by = NULL, updated_at = now()
+        `UPDATE projects SET status = 'completed', completed_at = now(), claimed_by = NULL,
+           progress_pct = 100, updated_at = now()
          WHERE id = $1 AND status = 'running'`,
         [p.id]
       );
-      await log(client, p.id, 'control', 'auto_complete', 'Reached default step horizon', 0, 0, step + 1);
+      await log(client, p.id, 'control', 'schedule_complete', 'Progress reached 100%', 0, 0, step + 1);
     }
   } finally {
     client.release();
@@ -86,13 +149,20 @@ async function log(client, projectId, phase, action, detail, tokens, durationMs 
 
 async function executeAgentTick(project, step) {
   const key = process.env.OPENROUTER_API_KEY;
+  const scheduleNote = [
+    project.allotted_hours != null ? `Allotted hours: ${project.allotted_hours}` : null,
+    project.due_at ? `Due: ${project.due_at}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   if (!key) {
     const tokens = 120 + step * 10;
     return {
       phase: 'orchestration',
       action: 'local_progress',
-      detail: `Local agent tick ${step} on "${project.title}". Goal: ${project.goal || '(none)'}. Set OPENROUTER_API_KEY for LLM.`,
-      summary: `Completed planning slice ${step}`,
+      detail: `Local agent tick ${step} on "${project.title}". Goal: ${project.goal || '(none)'}. ${scheduleNote}`,
+      summary: `Completed work slice ${step}${scheduleNote ? ` (${scheduleNote})` : ''}`,
       tokens,
     };
   }
@@ -103,9 +173,12 @@ async function executeAgentTick(project, step) {
       `Project: ${project.title}`,
       `Goal: ${project.goal || 'n/a'}`,
       `Step: ${step}`,
+      scheduleNote,
       `Checkpoint: ${JSON.stringify(project.checkpoint || {})}`,
-      `Return a short progress update (3-6 sentences) of useful work toward the goal.`,
-    ].join('\n');
+      `Work within the time budget. Return a short progress update (3-6 sentences).`,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',

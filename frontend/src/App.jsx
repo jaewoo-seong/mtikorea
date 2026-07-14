@@ -43,7 +43,8 @@ export default function App() {
         <Route index element={<Navigate to="/clients" replace />} />
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/clients/:id" element={<ClientDetailPage />} />
-        <Route path="/email" element={<EmailPage />} />
+        <Route path="/email" element={<Navigate to="/email/inbox" replace />} />
+        <Route path="/email/:folder" element={<EmailPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
         <Route path="/documents" element={<DocumentsPage />} />

@@ -113,3 +113,20 @@ Wired end-to-end in code, but “production level” still needs:
 - [ ] Gmail keys for real email
 - [ ] OpenRouter for serious agent work
 - [ ] Git commit + GitHub remote deploy pipeline
+
+---
+
+## Fix Google `unauthorized_client`
+
+Google rejected the OAuth client. Checklist:
+
+1. OAuth client type = **Web application** (not Desktop)
+2. Redirect URI *exact* match:
+   - Google console: `https://YOUR-RAILWAY-HOST/auth/google/callback`
+   - Railway `GOOGLE_CALLBACK_URL` = same string
+   - Railway `APP_URL` = `https://YOUR-RAILWAY-HOST`
+3. `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` are a pair from **that same** client (re-paste, no spaces)
+4. If using `GMAIL_REFRESH_TOKEN`: it must be from **this** client. If unsure, delete the var and use **Continue with Google** once (consent screen) to store a fresh token
+5. Gmail API enabled on the same Google Cloud project
+
+Developer pass still works while Google is broken.

@@ -13,14 +13,21 @@ const FOLDER_QUERIES = {
   all: 'in:anywhere -in:trash -in:spam',
 };
 
+function trimEnv(name) {
+  const v = process.env[name];
+  return v == null ? v : String(v).trim();
+}
+
 function clientFromTokens(refreshToken, accessToken) {
-  const oauth2 = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
-  );
+  const clientId = trimEnv('GOOGLE_CLIENT_ID');
+  const clientSecret = trimEnv('GOOGLE_CLIENT_SECRET');
+  if (!clientId || !clientSecret) {
+    throw Object.assign(new Error('GOOGLE_CLIENT_ID/SECRET missing'), { status: 503 });
+  }
+  const oauth2 = new google.auth.OAuth2(clientId, clientSecret);
   oauth2.setCredentials({
-    refresh_token: refreshToken,
-    access_token: accessToken || undefined,
+    refresh_token: String(refreshToken || '').trim(),
+    access_token: accessToken ? String(accessToken).trim() : undefined,
   });
   return oauth2;
 }

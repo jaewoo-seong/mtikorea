@@ -280,6 +280,36 @@ router.post('/:id/notes', async (req, res, next) => {
   }
 });
 
+router.patch('/:id', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const clientId = req.body?.clientId;
+    if (clientId === undefined) return res.status(400).json({ error: 'clientId required (null to unlink)' });
+    if (clientId) {
+      const ok = await query('SELECT id FROM clients WHERE id = $1 AND org_id = $2', [
+        clientId,
+        req.user.org_id,
+      ]);
+      if (!ok.rows[0]) return res.status(404).json({ error: 'Client not found' });
+    }
+    const { rows } = await query(
+      `UPDATE emails SET client_id = $3
+       WHERE id = $1 AND org_id = $2 RETURNING *`,
+      [req.params.id, req.user.org_id, clientId || null]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    if (rows[0].thread_id) {
+      await query(
+        `UPDATE email_threads SET client_id = $2, updated_at = now() WHERE id = $1 AND org_id = $3`,
+        [rows[0].thread_id, clientId || null, req.user.org_id]
+      );
+    }
+    res.json({ email: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/:id/actions', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });

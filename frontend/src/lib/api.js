@@ -68,6 +68,11 @@ export const api = {
       request(`/api/emails/${id}/actions`, { method: 'POST', body: JSON.stringify({ action }) }),
     note: (id, note) =>
       request(`/api/emails/${id}/notes`, { method: 'POST', body: JSON.stringify({ note }) }),
+    linkClient: (id, clientId) =>
+      request(`/api/emails/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ clientId }),
+      }),
     organize: (body) =>
       request('/api/emails/organize', { method: 'POST', body: JSON.stringify(body) }),
   },
@@ -76,8 +81,11 @@ export const api = {
     list: () => request('/api/projects'),
     get: (id) => request(`/api/projects/${id}`),
     create: (body) => request('/api/projects', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) =>
+      request(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     start: (id) => request(`/api/projects/${id}/start`, { method: 'POST', body: '{}' }),
     stop: (id) => request(`/api/projects/${id}/stop`, { method: 'POST', body: '{}' }),
+    complete: (id) => request(`/api/projects/${id}/complete`, { method: 'POST', body: '{}' }),
     upload: (id, files) => {
       const fd = new FormData();
       [...files].forEach((f) => fd.append('files', f));

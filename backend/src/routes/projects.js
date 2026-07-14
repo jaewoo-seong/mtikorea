@@ -3,23 +3,32 @@ const multer = require('multer');
 const { query } = require('../lib/db');
 const { requireAuth } = require('../lib/auth');
 const { saveBuffer, resolvePath } = require('../lib/storage');
+const { projectProgress } = require('../lib/projectProgress');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const router = express.Router();
 router.use(requireAuth);
 
+function withProgress(row) {
+  const metrics = projectProgress(row);
+  return { ...row, ...metrics, progress_pct: metrics.progressPct };
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const { rows } = await query(
       `SELECT p.*, c.name AS client_name,
-        (SELECT COUNT(*)::int FROM agent_work_log w WHERE w.project_id = p.id) AS log_count
+        (SELECT COUNT(*)::int FROM agent_work_log w WHERE w.project_id = p.id) AS log_count,
+        (SELECT COUNT(*)::int FROM project_files f WHERE f.project_id = p.id) AS file_count,
+        (SELECT COUNT(*)::int FROM agent_task_results r WHERE r.project_id = p.id) AS result_count,
+        (SELECT COUNT(*)::int FROM shared_documents d WHERE d.project_id = p.id) AS document_count
        FROM projects p
        LEFT JOIN clients c ON c.id = p.client_id
        WHERE p.org_id = $1
        ORDER BY p.updated_at DESC`,
       [req.user.org_id]
     );
-    res.json({ projects: rows });
+    res.json({ projects: rows.map(withProgress) });
   } catch (err) {
     next(err);
   }
@@ -28,16 +37,29 @@ router.get('/', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const { rows } = await query(
-      'SELECT * FROM projects WHERE id = $1 AND org_id = $2',
+      `SELECT p.*, c.name AS client_name
+       FROM projects p LEFT JOIN clients c ON c.id = p.client_id
+       WHERE p.id = $1 AND p.org_id = $2`,
       [req.params.id, req.user.org_id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    const project = withProgress(rows[0]);
+    await query('UPDATE projects SET progress_pct = $2, updated_at = updated_at WHERE id = $1', [
+      project.id,
+      project.progressPct,
+    ]);
+
     const files = await query(
-      'SELECT id, filename, mime_type, size_bytes, created_at FROM project_files WHERE project_id = $1',
+      'SELECT id, filename, mime_type, size_bytes, created_at, storage_path FROM project_files WHERE project_id = $1 ORDER BY created_at DESC',
+      [req.params.id]
+    );
+    const docs = await query(
+      `SELECT id, title, filename, mime_type, size_bytes, description, created_at
+       FROM shared_documents WHERE project_id = $1 ORDER BY created_at DESC`,
       [req.params.id]
     );
     const logs = await query(
-      'SELECT * FROM agent_work_log WHERE project_id = $1 ORDER BY step_number ASC',
+      'SELECT * FROM agent_work_log WHERE project_id = $1 ORDER BY step_number DESC LIMIT 200',
       [req.params.id]
     );
     const results = await query(
@@ -45,9 +67,10 @@ router.get('/:id', async (req, res, next) => {
       [req.params.id]
     );
     res.json({
-      project: rows[0],
+      project,
       files: files.rows,
-      logs: logs.rows,
+      documents: docs.rows,
+      logs: logs.rows.reverse(),
       results: results.rows,
     });
   } catch (err) {
@@ -78,10 +101,9 @@ router.get('/:id/logs/stream', async (req, res, next) => {
         lastStep = row.step_number;
         res.write(`data: ${JSON.stringify(row)}\n\n`);
       }
-      const st = await query('SELECT status, tokens_used, token_budget FROM projects WHERE id = $1', [
-        req.params.id,
-      ]);
-      res.write(`event: status\ndata: ${JSON.stringify(st.rows[0])}\n\n`);
+      const st = await query('SELECT * FROM projects WHERE id = $1', [req.params.id]);
+      const enriched = withProgress(st.rows[0]);
+      res.write(`event: status\ndata: ${JSON.stringify(enriched)}\n\n`);
     };
 
     await tick();
@@ -97,14 +119,58 @@ router.get('/:id/logs/stream', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
-    const { title, goal, clientId, tokenBudget } = req.body || {};
+    const { title, goal, clientId, tokenBudget, allottedHours, dueAt } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title required' });
     const { rows } = await query(
-      `INSERT INTO projects (org_id, client_id, title, goal, token_budget, created_by, status)
-       VALUES ($1,$2,$3,$4,COALESCE($5,50000),$6,'draft') RETURNING *`,
-      [req.user.org_id, clientId || null, title, goal || null, tokenBudget || null, req.user.id]
+      `INSERT INTO projects (
+         org_id, client_id, title, goal, token_budget, allotted_hours, due_at, created_by, status
+       ) VALUES ($1,$2,$3,$4,COALESCE($5,50000),$6,$7,$8,'draft') RETURNING *`,
+      [
+        req.user.org_id,
+        clientId || null,
+        title,
+        goal || null,
+        tokenBudget || null,
+        allottedHours != null && allottedHours !== '' ? Number(allottedHours) : null,
+        dueAt || null,
+        req.user.id,
+      ]
     );
-    res.status(201).json({ project: rows[0] });
+    res.status(201).json({ project: withProgress(rows[0]) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/:id', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const map = {
+      title: 'title',
+      goal: 'goal',
+      clientId: 'client_id',
+      tokenBudget: 'token_budget',
+      allottedHours: 'allotted_hours',
+      dueAt: 'due_at',
+    };
+    const updates = [];
+    const params = [];
+    for (const [key, col] of Object.entries(map)) {
+      if (req.body[key] !== undefined) {
+        params.push(req.body[key] === '' ? null : req.body[key]);
+        updates.push(`${col} = $${params.length}`);
+      }
+    }
+    if (!updates.length) return res.status(400).json({ error: 'No fields' });
+    params.push(req.params.id, req.user.org_id);
+    const { rows } = await query(
+      `UPDATE projects SET ${updates.join(', ')}, updated_at = now()
+       WHERE id = $${params.length - 1} AND org_id = $${params.length}
+       RETURNING *`,
+      params
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json({ project: withProgress(rows[0]) });
   } catch (err) {
     next(err);
   }
@@ -137,6 +203,24 @@ router.post('/:id/files', upload.array('files', 20), async (req, res, next) => {
           req.user.id,
         ]
       );
+      // Also index in shared documents for CRM visibility
+      await query(
+        `INSERT INTO shared_documents (
+           org_id, client_id, project_id, title, description, filename, mime_type, size_bytes, storage_path, uploaded_by
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          req.user.org_id,
+          project.rows[0].client_id,
+          req.params.id,
+          file.originalname,
+          'Project upload',
+          file.originalname,
+          file.mimetype,
+          saved.size,
+          saved.storagePath,
+          req.user.id,
+        ]
+      );
       created.push(rows[0]);
     }
     await query('UPDATE projects SET updated_at = now() WHERE id = $1', [req.params.id]);
@@ -162,10 +246,13 @@ router.post('/:id/start', async (req, res, next) => {
     await query(
       `INSERT INTO agent_work_log (project_id, step_number, phase, action, detail, tokens_used)
        VALUES ($1, COALESCE((SELECT MAX(step_number) FROM agent_work_log WHERE project_id = $1),0)+1,
-               'control', 'start', 'User started project — worker will claim', 0)`,
-      [req.params.id]
+               'control', 'start', $2, 0)`,
+      [
+        req.params.id,
+        `User started project. Hours=${rows[0].allotted_hours || '∞'} due=${rows[0].due_at || 'none'}`,
+      ]
     );
-    res.json({ project: rows[0] });
+    res.json({ project: withProgress(rows[0]) });
   } catch (err) {
     next(err);
   }
@@ -188,7 +275,7 @@ router.post('/:id/stop', async (req, res, next) => {
                'control', 'stop', 'User stopped project', 0)`,
       [req.params.id]
     );
-    res.json({ project: rows[0] });
+    res.json({ project: withProgress(rows[0]) });
   } catch (err) {
     next(err);
   }
@@ -198,13 +285,13 @@ router.post('/:id/complete', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
     const { rows } = await query(
-      `UPDATE projects SET status = 'completed', completed_at = now(),
+      `UPDATE projects SET status = 'completed', completed_at = now(), progress_pct = 100,
          claimed_by = NULL, updated_at = now()
        WHERE id = $1 AND org_id = $2
        RETURNING *`,
       [req.params.id, req.user.org_id]
     );
-    res.json({ project: rows[0] });
+    res.json({ project: withProgress(rows[0]) });
   } catch (err) {
     next(err);
   }

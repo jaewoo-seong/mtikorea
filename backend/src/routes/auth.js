@@ -11,11 +11,29 @@ const { query } = require('../lib/db');
 
 const router = express.Router();
 
-function oauth2Client(redirectUri) {
+function trimEnv(name) {
+  const v = process.env[name];
+  return v == null ? v : String(v).trim();
+}
+
+function callbackUrl(req) {
+  const configured = trimEnv('GOOGLE_CALLBACK_URL');
+  if (configured) return configured;
+  if (req) {
+    const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const host = req.get('x-forwarded-host') || req.get('host');
+    if (host) return `${proto}://${host}/auth/google/callback`;
+  }
+  return 'http://localhost:4000/auth/google/callback';
+}
+
+function oauth2Client(reqOrRedirect) {
+  const redirectUri =
+    typeof reqOrRedirect === 'string' ? reqOrRedirect : callbackUrl(reqOrRedirect);
   return new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    redirectUri || process.env.GOOGLE_CALLBACK_URL
+    trimEnv('GOOGLE_CLIENT_ID'),
+    trimEnv('GOOGLE_CLIENT_SECRET'),
+    redirectUri
   );
 }
 
@@ -25,15 +43,18 @@ router.get('/me', async (req, res) => {
 });
 
 router.get('/google', (req, res) => {
-  if (!process.env.GOOGLE_CLIENT_ID) {
+  if (!trimEnv('GOOGLE_CLIENT_ID') || !trimEnv('GOOGLE_CLIENT_SECRET')) {
     return res.status(503).json({ error: 'Google OAuth not configured' });
   }
-  const client = oauth2Client();
+  const redirectUri = callbackUrl(req);
+  const client = oauth2Client(redirectUri);
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = state;
+  req.session.oauthRedirectUri = redirectUri;
   const url = client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
+    include_granted_scopes: true,
     scope: [
       'openid',
       'email',
@@ -49,11 +70,20 @@ router.get('/google', (req, res) => {
 
 router.get('/google/callback', async (req, res, next) => {
   try {
-    const { code, state } = req.query;
+    const { code, state, error, error_description: errorDescription } = req.query;
+    if (error) {
+      return res.status(400).send(
+        `Google OAuth error: ${error}${errorDescription ? ` — ${errorDescription}` : ''}<br/><br/>` +
+          `Callback URL this app uses: <code>${callbackUrl(req)}</code><br/>` +
+          `Fix: Google Cloud Console → APIs & Services → Credentials → your OAuth 2.0 Client → ` +
+          `Authorized redirect URIs must include that exact URL (https, no trailing slash mismatch).`
+      );
+    }
     if (!code || state !== req.session.oauthState) {
       return res.status(400).send('Invalid OAuth state');
     }
-    const client = oauth2Client();
+    const redirectUri = req.session.oauthRedirectUri || callbackUrl(req);
+    const client = oauth2Client(redirectUri);
     const { tokens } = await client.getToken(code);
     client.setCredentials(tokens);
     const oauth2 = google.oauth2({ version: 'v2', auth: client });
@@ -90,6 +120,16 @@ router.get('/google/callback', async (req, res, next) => {
     const appUrl = process.env.APP_URL || 'http://localhost:5173';
     res.redirect(`${appUrl}/`);
   } catch (err) {
+    const msg = err?.response?.data?.error || err.message || 'oauth_failed';
+    if (String(msg).includes('unauthorized_client') || err.code === 'unauthorized_client') {
+      return res.status(400).send(
+        `Google unauthorized_client<br/><br/>` +
+          `Usually: redirect URI mismatch, or client ID/secret/refresh token not from the same Web OAuth client.<br/>` +
+          `This app callback: <code>${callbackUrl(req)}</code><br/>` +
+          `Add that exact URI in Google Cloud → Credentials → OAuth client → Authorized redirect URIs.<br/>` +
+          `Then clear GMAIL_REFRESH_TOKEN and sign in with Google again to mint a new token.`
+      );
+    }
     next(err);
   }
 });
