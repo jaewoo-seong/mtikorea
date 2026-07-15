@@ -75,13 +75,68 @@ async function runProjectStep(pool, project) {
       [p.id]
     );
 
+    async function writeCheckpoint(patch) {
+      const body = {
+        ...patch,
+        stage_at: new Date().toISOString(),
+        last_step: step,
+        cycle: step,
+      };
+      await client.query(
+        `UPDATE projects SET
+           checkpoint = COALESCE(checkpoint, '{}'::jsonb) || $2::jsonb,
+           updated_at = now()
+         WHERE id = $1 AND status = 'running'`,
+        [p.id, JSON.stringify(body)]
+      );
+    }
+
+    await writeCheckpoint({
+      stage: 'queued',
+      detail: `Cycle ${step} claimed — starting orchestrator`,
+      mode: process.env.OPENROUTER_API_KEY ? 'openrouter' : 'local',
+    });
+
     const started = Date.now();
     const cycle = await runOrchestratorCycle(p, {
       step,
       fileNames: filesRes.rows.map((r) => r.filename),
       recentLog: recentRes.rows.map((r) => `${r.phase}:${r.action}:${r.detail || ''}`),
+      onProgress: async (evt) => {
+        await writeCheckpoint({
+          stage: evt.stage,
+          detail: evt.detail || null,
+          mode: evt.mode,
+          main_model: evt.main_model,
+          last_summary: evt.last_summary,
+          next_focus: evt.next_focus,
+          status: evt.status,
+          last_error: evt.last_error || null,
+          error_code: evt.error_code || null,
+          current_sub: evt.current_sub || null,
+          subtask_count: evt.subtask_count,
+          sub_ok: evt.sub_ok,
+          sub_fail: evt.sub_fail,
+        });
+        // Live breadcrumb in work log so UI timeline updates mid-cycle
+        if (evt.stage && evt.detail) {
+          await log(
+            client,
+            p.id,
+            'progress',
+            evt.stage,
+            evt.detail,
+            0,
+            0,
+            step,
+            evt.current_sub?.model || evt.main_model || 'orchestrator'
+          );
+        }
+      },
     });
     const duration = Date.now() - started;
+
+    await writeCheckpoint({ stage: 'persisting', detail: 'Writing logs, messages, docs' });
 
     // Persist per-phase logs (share cycle step number; sub_agent = model slug)
     if (cycle.logs?.length) {
@@ -118,12 +173,36 @@ async function runProjectStep(pool, project) {
     };
     const metrics = projectProgress(updated, new Date(), cycle.progress_pct);
 
+    const endStage =
+      cycle.error || cycle.status === 'blocked'
+        ? cycle.status === 'blocked'
+          ? 'blocked'
+          : 'error'
+        : cycle.status === 'done'
+          ? 'done'
+          : 'idle';
+
     const checkpointPatch = {
       last_step: step,
       status: cycle.status,
+      stage: endStage,
+      detail:
+        cycle.error?.message ||
+        cycle.summary ||
+        `Cycle ${step} finished · ${cycle.status}`,
       next_focus: cycle.next_focus,
       last_summary: cycle.summary,
-      main_model: process.env.OPENROUTER_MAIN_MODEL || process.env.OPENROUTER_WORKER_MODEL || 'anthropic/claude-haiku-4.5',
+      last_error: cycle.error?.message || null,
+      error_code: cycle.error?.code || null,
+      mode: cycle.mode || (process.env.OPENROUTER_API_KEY ? 'openrouter' : 'local'),
+      main_model:
+        process.env.OPENROUTER_MAIN_MODEL ||
+        process.env.OPENROUTER_WORKER_MODEL ||
+        'anthropic/claude-haiku-4.5',
+      sub_ok: cycle.sub_ok ?? null,
+      sub_fail: cycle.sub_fail ?? null,
+      cycle_ms: duration,
+      stage_at: new Date().toISOString(),
     };
 
     await client.query(
@@ -146,17 +225,30 @@ async function runProjectStep(pool, project) {
       );
     }
 
-    if (cycle.summary) {
-      await client.query(
-        `INSERT INTO project_messages (project_id, org_id, role, content, error_code)
-         VALUES ($1,$2,'assistant',$3,NULL)`,
-        [p.id, p.org_id, cycle.summary]
-      );
+    // Always post a cycle report so the chat shows stage outcome
+    const report = [
+      `**Cycle ${step}** · stage **${endStage}** · agent status \`${cycle.status}\``,
+      cycle.mode === 'local' ? '_Mode: local (no OPENROUTER_API_KEY)_' : null,
+      cycle.summary || null,
+      cycle.next_focus ? `Next: ${cycle.next_focus}` : null,
+      cycle.sub_ok != null ? `Subs: ${cycle.sub_ok} ok / ${cycle.sub_fail || 0} failed` : null,
+      cycle.error ? `Error: ${cycle.error.message}` : null,
+      `Took ${Math.round(duration / 1000)}s · ~${cycle.tokens || 0} tokens · progress ${metrics.progressPct}%`,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
+    await client.query(
+      `INSERT INTO project_messages (project_id, org_id, role, content, error_code)
+       VALUES ($1,$2,'assistant',$3,NULL)`,
+      [p.id, p.org_id, report]
+    );
+
+    if (cycle.summary) {
       await client.query(
         `INSERT INTO agent_task_results (project_id, category, title, summary, confidence_score)
          VALUES ($1, 'progress', $2, $3, 0.7)`,
-        [p.id, `Cycle ${step} · ${cycle.status}`, cycle.summary]
+        [p.id, `Cycle ${step} · ${cycle.status} · ${endStage}`, cycle.summary]
       );
     }
 

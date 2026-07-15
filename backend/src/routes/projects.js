@@ -357,6 +357,26 @@ router.post('/:id/complete', async (req, res, next) => {
   }
 });
 
+router.delete('/:id', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    // Clear claim so a mid-cycle worker cannot revive a deleted id via stale claim update
+    await query(
+      `UPDATE projects SET status = 'paused', claimed_by = NULL, claimed_at = NULL, updated_at = now()
+       WHERE id = $1 AND org_id = $2 AND status = 'running'`,
+      [req.params.id, req.user.org_id]
+    );
+    const { rows } = await query(
+      `DELETE FROM projects WHERE id = $1 AND org_id = $2 RETURNING id, title`,
+      [req.params.id, req.user.org_id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true, deleted: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id/files/:fileId/download', async (req, res, next) => {
   try {
     const { rows } = await query(

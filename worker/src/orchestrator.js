@@ -75,6 +75,7 @@ async function runOrchestratorCycle(project, context = {}) {
   const fileNames = context.fileNames || [];
   const recentLog = context.recentLog || [];
   const checkpoint = project.checkpoint || {};
+  const onProgress = typeof context.onProgress === 'function' ? context.onProgress : async () => {};
 
   const scheduleNote = [
     project.allotted_hours != null ? `Allotted hours: ${project.allotted_hours}` : null,
@@ -85,7 +86,19 @@ async function runOrchestratorCycle(project, context = {}) {
     .join(' · ');
 
   if (!hasApiKey()) {
-    return localCycle(project, step, scheduleNote);
+    await onProgress({
+      stage: 'planning',
+      detail: 'No OPENROUTER_API_KEY — running local mock cycle',
+      mode: 'local',
+    });
+    const local = localCycle(project, step, scheduleNote);
+    await onProgress({
+      stage: 'idle',
+      detail: local.summary,
+      mode: 'local',
+      status: local.status,
+    });
+    return { ...local, mode: 'local' };
   }
 
   const mainModel = getMainModel();
@@ -103,6 +116,13 @@ async function runOrchestratorCycle(project, context = {}) {
     `Recent log: ${recentLog.slice(0, 8).join(' | ').slice(0, 2000)}`,
   ].join('\n');
 
+  await onProgress({
+    stage: 'planning',
+    detail: `Main model ${mainModel} planning cycle ${step}`,
+    mode: 'openrouter',
+    main_model: mainModel,
+  });
+
   let planRaw;
   try {
     planRaw = await chat({
@@ -114,6 +134,13 @@ async function runOrchestratorCycle(project, context = {}) {
       ],
     });
   } catch (err) {
+    await onProgress({
+      stage: 'error',
+      detail: err.message,
+      last_error: err.message,
+      error_code: err.code || 'llm_error',
+      mode: 'openrouter',
+    });
     return {
       status: 'blocked',
       summary: null,
@@ -122,6 +149,7 @@ async function runOrchestratorCycle(project, context = {}) {
       progress_pct: null,
       next_focus: checkpoint.next_focus || null,
       outputs: [],
+      mode: 'openrouter',
       logs: [
         {
           phase: 'orchestration',
@@ -149,9 +177,22 @@ async function runOrchestratorCycle(project, context = {}) {
   const subtasks = plan.subtasks.slice(0, subConcurrency());
 
   if (subtasks.length) {
+    await onProgress({
+      stage: 'sub_agents',
+      detail: `Running ${subtasks.length} free sub-agent(s): ${subtasks.map((t) => t.role || 'agent').join(', ')}`,
+      mode: 'openrouter',
+      subtask_count: subtasks.length,
+      last_summary: plan.summary,
+    });
     subResults = await mapPool(subtasks, subConcurrency(), async (task, idx) => {
       const model = pickSubModel(idx);
       const role = roleForIndex(idx, task.role);
+      await onProgress({
+        stage: 'sub_agents',
+        detail: `${role} → ${model}`,
+        mode: 'openrouter',
+        current_sub: { role, model, index: idx + 1, of: subtasks.length },
+      });
       try {
         const res = await chat({
           model,
@@ -193,17 +234,41 @@ async function runOrchestratorCycle(project, context = {}) {
         });
         totalTokens += 20;
         error = error || { code: err.code || 'sub_agent_error', message: err.message };
+        await onProgress({
+          stage: 'sub_agents',
+          detail: `${role} failed: ${err.message}`,
+          last_error: err.message,
+          error_code: err.code || 'sub_agent_error',
+          mode: 'openrouter',
+        });
         return { role, model, ok: false, content: err.message, tokens: 20 };
       }
     });
+  } else {
+    await onProgress({
+      stage: 'sub_agents',
+      detail: 'No subtasks from planner — skipping to synthesis',
+      mode: 'openrouter',
+      last_summary: plan.summary,
+    });
   }
 
+  const subOk = subResults.filter((r) => r.ok).length;
+  const subFail = subResults.filter((r) => !r.ok).length;
   const subDigest = subResults
     .map(
       (r, i) =>
         `### Sub-agent ${i + 1} (${r.role} / ${r.model}) ${r.ok ? 'OK' : 'ERROR'}\n${r.content.slice(0, 2500)}`
     )
     .join('\n\n');
+
+  await onProgress({
+    stage: 'synthesizing',
+    detail: `Main ${mainModel} synthesizing (${subOk} ok / ${subFail} failed subs)`,
+    mode: 'openrouter',
+    sub_ok: subOk,
+    sub_fail: subFail,
+  });
 
   let synthRaw;
   try {
@@ -232,6 +297,13 @@ async function runOrchestratorCycle(project, context = {}) {
       tokens: 40,
       subAgent: mainModel,
     });
+    await onProgress({
+      stage: 'error',
+      detail: err.message,
+      last_error: err.message,
+      error_code: err.code || 'llm_error',
+      mode: 'openrouter',
+    });
     return {
       status: plan.status,
       summary: plan.summary,
@@ -240,6 +312,7 @@ async function runOrchestratorCycle(project, context = {}) {
       progress_pct: plan.progress_pct,
       next_focus: plan.next_focus,
       outputs: [],
+      mode: 'openrouter',
       logs,
       error: { code: err.code || 'llm_error', message: err.message },
     };
@@ -267,6 +340,20 @@ async function runOrchestratorCycle(project, context = {}) {
   const progress_pct =
     synth.progress_pct != null ? synth.progress_pct : plan.progress_pct;
 
+  const finalStage =
+    status === 'blocked' ? 'blocked' : status === 'done' ? 'done' : error ? 'error' : 'idle';
+
+  await onProgress({
+    stage: finalStage === 'idle' ? 'persisting' : finalStage,
+    detail: synth.summary || plan.summary,
+    last_summary: synth.summary || plan.summary,
+    next_focus: synth.next_focus || plan.next_focus,
+    status,
+    mode: 'openrouter',
+    last_error: error?.message || null,
+    error_code: error?.code || null,
+  });
+
   return {
     status,
     summary: synth.summary || plan.summary,
@@ -275,8 +362,11 @@ async function runOrchestratorCycle(project, context = {}) {
     progress_pct,
     next_focus: synth.next_focus || plan.next_focus,
     outputs: synth.outputs,
+    mode: 'openrouter',
     logs,
     error,
+    sub_ok: subOk,
+    sub_fail: subFail,
   };
 }
 
@@ -290,6 +380,7 @@ function localCycle(project, step, scheduleNote) {
     tokens: 80 + step * 15,
     progress_pct: progress,
     next_focus: `Continue goal work for ${project.title}`,
+    mode: 'local',
     outputs:
       step % 2 === 0
         ? [

@@ -86,6 +86,7 @@ export const api = {
     start: (id) => request(`/api/projects/${id}/start`, { method: 'POST', body: '{}' }),
     stop: (id) => request(`/api/projects/${id}/stop`, { method: 'POST', body: '{}' }),
     complete: (id) => request(`/api/projects/${id}/complete`, { method: 'POST', body: '{}' }),
+    delete: (id) => request(`/api/projects/${id}`, { method: 'DELETE' }),
     sendMessage: (id, content) =>
       request(`/api/projects/${id}/messages`, {
         method: 'POST',

@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import {
+  PIPELINE,
+  buildDiagnostics,
+  checkpointOf,
+  pipelineIndex,
+  stageLabel,
+} from '../lib/projectStage';
 
 function ProgressBar({ value, live }) {
   const pct = Math.max(0, Math.min(100, Number(value) || 0));
@@ -24,11 +31,13 @@ function ProgressBar({ value, live }) {
 
 export default function ProjectDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [msg, setMsg] = useState('');
   const [schedule, setSchedule] = useState({ allottedHours: '', dueAt: '' });
   const [taskTitle, setTaskTitle] = useState('');
   const [chatInput, setChatInput] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   async function load() {
     const d = await api.projects.get(id);
@@ -109,6 +118,21 @@ export default function ProjectDetailPage() {
     await load();
   }
 
+  async function removeProject() {
+    const title = data?.project?.title || 'this project';
+    if (!window.confirm(`Delete "${title}"? Work logs and project files cascade-delete. Shared docs stay (unlink).`)) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await api.projects.delete(id);
+      navigate('/projects');
+    } catch (e) {
+      setMsg(e.message);
+      setDeleting(false);
+    }
+  }
+
   if (!data) return <div className="text-sm text-muted">{msg || 'Loading…'}</div>;
   const {
     project,
@@ -122,6 +146,13 @@ export default function ProjectDetailPage() {
   } = data;
   const live = project.status === 'running';
   const errors = messages.filter((m) => m.role === 'error');
+  const cp = checkpointOf(project);
+  const diagnostics = buildDiagnostics(project, logs, errors);
+  const activeStage = cp.stage || (live ? 'queued' : project.status === 'completed' ? 'done' : 'idle');
+  const activeIdx = pipelineIndex(activeStage);
+  const displayPipeline = PIPELINE.filter((s) =>
+    ['queued', 'planning', 'sub_agents', 'synthesizing', 'persisting', 'idle'].includes(s.id)
+  );
 
   return (
     <div className="space-y-6">
@@ -137,10 +168,22 @@ export default function ProjectDetailPage() {
               </Link>
             )}
             <span className="badge bg-slate-100 capitalize">{project.status}</span>
+            <span
+              className={`badge ${
+                activeStage === 'error' || activeStage === 'blocked'
+                  ? 'bg-red-100 text-danger'
+                  : live
+                    ? 'bg-blue-100 text-primary'
+                    : 'bg-slate-100'
+              }`}
+            >
+              Stage: {stageLabel(activeStage)}
+            </span>
+            {cp.mode && <span className="badge bg-violet-50 text-violet-700">Mode: {cp.mode}</span>}
             {project.overdue && <span className="badge bg-red-100 text-danger">Past due</span>}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {(project.status === 'draft' || project.status === 'paused') && (
             <button type="button" className="btn-primary" onClick={start}>Start worker</button>
           )}
@@ -150,6 +193,9 @@ export default function ProjectDetailPage() {
               Mark complete
             </button>
           )}
+          <button type="button" className="btn-ghost text-danger" disabled={deleting} onClick={removeProject}>
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
         </div>
       </div>
 
@@ -183,17 +229,138 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {!!errors.length && (
-        <div className="card p-4 border-danger/30 bg-red-50 text-sm space-y-2">
-          <div className="font-semibold text-danger">Agent / API errors</div>
-          {errors.slice(-5).map((m) => (
-            <div key={m.id} className="text-danger/90 text-xs whitespace-pre-wrap border-t border-red-100 pt-2">
-              {m.error_code && <span className="font-mono mr-2">[{m.error_code}]</span>}
-              {m.content}
-            </div>
-          ))}
+      <div className="card p-5 space-y-4 border border-line">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-semibold">Agent stage report</h2>
+            <p className="text-xs text-muted mt-0.5">
+              Live pipeline · polls every ~2.5s
+              {cp.stage_at ? ` · updated ${new Date(cp.stage_at).toLocaleString()}` : ''}
+            </p>
+          </div>
+          {cp.status && (
+            <span className="badge bg-slate-100 font-mono text-xs">agent: {cp.status}</span>
+          )}
         </div>
-      )}
+
+        <div className="flex flex-wrap gap-2">
+          {displayPipeline.map((s, idx) => {
+            const current = s.id === activeStage;
+            const done = activeIdx >= 0 && idx < activeIdx && !['error', 'blocked'].includes(activeStage);
+            return (
+              <div
+                key={s.id}
+                className={`rounded-lg px-3 py-2 text-xs border min-w-[6.5rem] ${
+                  current
+                    ? 'border-primary bg-blue-50 text-primary font-semibold'
+                    : done
+                      ? 'border-emerald-200 bg-emerald-50/80 text-success'
+                      : 'border-line bg-slate-50 text-muted'
+                }`}
+              >
+                <div className="uppercase tracking-wide text-[10px] opacity-70">{idx + 1}</div>
+                {s.label}
+                {current && live && <span className="ml-1 animate-pulse">●</span>}
+              </div>
+            );
+          })}
+          {(['error', 'blocked', 'done'].includes(activeStage)) && (
+            <div
+              className={`rounded-lg px-3 py-2 text-xs border min-w-[6.5rem] font-semibold ${
+                activeStage === 'done'
+                  ? 'border-emerald-200 bg-emerald-50 text-success'
+                  : 'border-red-200 bg-red-50 text-danger'
+              }`}
+            >
+              {stageLabel(activeStage)}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl bg-slate-50 border border-line p-3 text-sm space-y-2">
+          <div>
+            <span className="text-xs text-muted">Now</span>
+            <p className="mt-0.5 whitespace-pre-wrap">{cp.detail || 'No stage detail yet'}</p>
+          </div>
+          {cp.last_summary && (
+            <div className="border-t border-line pt-2">
+              <span className="text-xs text-muted">Last summary</span>
+              <p className="mt-0.5 whitespace-pre-wrap text-muted">{cp.last_summary}</p>
+            </div>
+          )}
+          {cp.next_focus && (
+            <div className="border-t border-line pt-2">
+              <span className="text-xs text-muted">Next focus</span>
+              <p className="mt-0.5">{cp.next_focus}</p>
+            </div>
+          )}
+          <div className="border-t border-line pt-2 grid sm:grid-cols-3 gap-2 text-xs text-muted">
+            <div>Cycle #{cp.last_step || cp.cycle || '—'}</div>
+            <div>Model: {cp.main_model || '—'}</div>
+            <div>
+              Subs:{' '}
+              {cp.sub_ok != null ? `${cp.sub_ok} ok / ${cp.sub_fail || 0} fail` : cp.subtask_count != null ? `${cp.subtask_count} queued` : '—'}
+            </div>
+            {cp.current_sub && (
+              <div className="sm:col-span-3 text-primary">
+                Active sub: {cp.current_sub.role} → {cp.current_sub.model} ({cp.current_sub.index}/{cp.current_sub.of})
+              </div>
+            )}
+            {cp.cycle_ms != null && <div>Last cycle: {Math.round(Number(cp.cycle_ms) / 1000)}s</div>}
+            {project.claimed_by && (
+              <div className="sm:col-span-2 font-mono truncate">Claimed: {project.claimed_by}</div>
+            )}
+          </div>
+        </div>
+
+        {!!diagnostics.length && (
+          <div className="space-y-2">
+            {diagnostics.map((d, i) => (
+              <div
+                key={i}
+                className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap ${
+                  d.level === 'error'
+                    ? 'bg-red-50 text-danger border border-red-100'
+                    : d.level === 'warn'
+                      ? 'bg-amber-50 text-amber-900 border border-amber-100'
+                      : 'bg-slate-50 text-muted border border-line'
+                }`}
+              >
+                {d.text}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!!errors.length && (
+          <div className="border-t border-line pt-3 space-y-2">
+            <div className="font-semibold text-danger text-sm">Recent errors</div>
+            {errors.slice(-8).map((m) => (
+              <div key={m.id} className="text-danger/90 text-xs whitespace-pre-wrap rounded-lg bg-red-50 px-3 py-2">
+                <div className="text-[10px] text-muted mb-1">{new Date(m.created_at).toLocaleString()}</div>
+                {m.error_code && <span className="font-mono mr-2">[{m.error_code}]</span>}
+                {m.content}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="border-t border-line pt-3">
+          <div className="font-semibold text-sm mb-2">Phase timeline (latest 12)</div>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {[...logs].reverse().slice(0, 12).map((l) => (
+              <div key={l.id} className="text-xs pl-3 border-l-2 border-primary/25">
+                <div className="font-mono text-muted">
+                  #{l.step_number} · {l.phase}/{l.action}
+                  {l.sub_agent ? ` · ${l.sub_agent}` : ''}
+                </div>
+                <div className="whitespace-pre-wrap line-clamp-3 mt-0.5">{l.detail}</div>
+              </div>
+            ))}
+            {!logs.length && <p className="text-xs text-muted">No work log yet</p>}
+          </div>
+        </div>
+      </div>
 
       <form onSubmit={saveSchedule} className="card p-5 grid md:grid-cols-3 gap-3 items-end">
         <label className="text-sm">
