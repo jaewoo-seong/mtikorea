@@ -317,6 +317,38 @@ router.post('/:id/files', upload.array('files', 20), async (req, res, next) => {
   }
 });
 
+router.post('/:id/staged/approve-all', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const { rows } = await query(
+      `UPDATE shared_documents SET
+         visibility = 'shared',
+         approved_at = now(),
+         approved_by = $3,
+         updated_at = now()
+       WHERE project_id = $1 AND org_id = $2 AND visibility = 'staged'
+       RETURNING id`,
+      [req.params.id, req.user.org_id, req.user.id]
+    );
+    res.json({ ok: true, approved: rows.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/staged/reject-all', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const { rows } = await query(
+      `DELETE FROM shared_documents WHERE project_id = $1 AND org_id = $2 AND visibility = 'staged' RETURNING id`,
+      [req.params.id, req.user.org_id]
+    );
+    res.json({ ok: true, rejected: rows.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/:id/start', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
@@ -448,8 +480,8 @@ router.post('/:id/messages', async (req, res, next) => {
         req.params.id,
         req.user.org_id,
         project.rows[0].status === 'running'
-          ? `Noted. Worker is running in the background and will stage document outputs for approval.\n\nYou said: ${content}`
-          : `Noted. Start the worker to process this project in the background. Outputs will appear under Pending approval before Shared docs.\n\nYou said: ${content}`,
+          ? `Got it — the worker will pick this up on its next cycle and keep it in mind for the rest of the run.\n\nYou said: ${content}`
+          : `Got it — this will be included once you Start the worker, and it'll keep being remembered for the rest of the run.\n\nYou said: ${content}`,
       ]
     );
 

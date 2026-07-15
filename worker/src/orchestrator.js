@@ -290,10 +290,15 @@ async function runOrchestratorCycle(project, context = {}) {
   let error = null;
   let rateLimited = false;
 
+  const pendingUserInstructions = context.pendingUserInstructions || [];
+
   const memoryBlock = [
     memory.last_critique ? `Last critique: ${memory.last_critique}` : null,
     Array.isArray(memory.idea_backlog) && memory.idea_backlog.length
       ? `Idea backlog: ${memory.idea_backlog.slice(-10).join(' | ')}`
+      : null,
+    Array.isArray(memory.user_instructions) && memory.user_instructions.length
+      ? `Standing user instructions (keep honoring these): ${memory.user_instructions.slice(-10).join(' | ')}`
       : null,
     memory.go_back_to ? `Go back preference: ${memory.go_back_to}` : null,
   ]
@@ -307,10 +312,15 @@ async function runOrchestratorCycle(project, context = {}) {
     `Iteration/cycle: ${step}`,
     scheduleNote,
     `Briefing files: ${fileNames.length ? fileNames.join(', ') : '(none)'}`,
+    pendingUserInstructions.length
+      ? `NEW INSTRUCTION FROM USER (just sent, address this specifically this cycle): ${pendingUserInstructions.join(' | ')}`
+      : null,
     memoryBlock || 'Memory: (empty)',
     `Checkpoint: ${JSON.stringify({ ...checkpoint, memory: undefined }).slice(0, 2000)}`,
     `Recent log: ${recentLog.slice(0, 8).join(' | ').slice(0, 2000)}`,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const retryHook = (stage) => async (info) => {
     await onProgress({
@@ -751,6 +761,9 @@ async function runWrapUpCycle(project, context = {}) {
     Array.isArray(memory.idea_backlog) && memory.idea_backlog.length
       ? `Idea backlog: ${memory.idea_backlog.slice(-10).join(' | ')}`
       : null,
+    Array.isArray(memory.user_instructions) && memory.user_instructions.length
+      ? `User instructions given mid-project (make sure the summary/outputs honor these): ${memory.user_instructions.slice(-10).join(' | ')}`
+      : null,
     `Checkpoint: ${JSON.stringify({ ...checkpoint, memory: undefined }).slice(0, 2500)}`,
   ]
     .filter(Boolean)
@@ -804,7 +817,6 @@ function failResult({
 }
 
 function localCycle(project, step, scheduleNote) {
-  const tags = getSubModels();
   const progress = Math.min(95, 10 + step * 8);
   return {
     status: 'continue',
@@ -836,7 +848,7 @@ function localCycle(project, step, scheduleNote) {
         action: 'local_sub',
         detail: 'Local free-sub simulation',
         tokens: 20,
-        subAgent: tags[0] || 'local-sub',
+        subAgent: 'local-sub',
       },
       {
         phase: 'synthesis',

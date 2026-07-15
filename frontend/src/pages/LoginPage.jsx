@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 
 export default function LoginPage({ onLogin }) {
@@ -6,6 +6,12 @@ export default function LoginPage({ onLogin }) {
   const [loading, setLoading] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [bypassEnabled, setBypassEnabled] = useState(false);
+  const [bypassLoading, setBypassLoading] = useState(false);
+
+  useEffect(() => {
+    api.devLoginStatus().then((s) => setBypassEnabled(Boolean(s.bypassEnabled))).catch(() => {});
+  }, []);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -18,6 +24,19 @@ export default function LoginPage({ onLogin }) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function onDevBypass() {
+    setBypassLoading(true);
+    setError('');
+    try {
+      const data = await api.devBypass();
+      onLogin(data.user);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBypassLoading(false);
     }
   }
 
@@ -54,6 +73,22 @@ export default function LoginPage({ onLogin }) {
         </form>
 
         {error && <p className="text-danger text-sm mt-4">{error}</p>}
+
+        {bypassEnabled && (
+          <div className="mt-6 pt-6 border-t border-line">
+            <button
+              type="button"
+              className="btn-secondary w-full"
+              onClick={onDevBypass}
+              disabled={bypassLoading}
+            >
+              {bypassLoading ? 'Signing in…' : 'Developer login (no credentials)'}
+            </button>
+            <p className="text-muted text-xs mt-2 text-center">
+              Local testing only — disabled automatically in production.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

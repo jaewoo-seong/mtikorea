@@ -137,10 +137,32 @@ router.get('/google/callback', async (req, res, next) => {
 
 router.get('/dev-login/status', (_req, res) => {
   const enabled = Boolean(process.env.DEV_AUTH_EMAIL && process.env.DEV_AUTH_PASSWORD);
+  // Credential-free bypass: only ever available outside production, regardless of
+  // what env vars happen to be set, so it can't accidentally ship live.
+  const bypassEnabled = process.env.NODE_ENV !== 'production' && Boolean(process.env.DEV_AUTH_EMAIL);
   res.json({
     enabled,
+    bypassEnabled,
     googleEnabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
   });
+});
+
+router.post('/dev-bypass', async (req, res, next) => {
+  try {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    if (!process.env.DEV_AUTH_EMAIL) {
+      return res.status(503).json({ error: 'Developer pass not configured (set DEV_AUTH_EMAIL)' });
+    }
+    const user = await upsertDevUser();
+    if (!user) return res.status(503).json({ error: 'Could not create developer user' });
+    req.session.userId = user.id;
+    req.session.orgId = user.org_id;
+    res.json({ user });
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.post('/dev-login', async (req, res, next) => {

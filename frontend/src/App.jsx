@@ -60,7 +60,7 @@ export default function App() {
         <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/admin" element={<AdminPage user={user} />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings" element={<SettingsPage user={user} />} />
       </Route>
       <Route path="*" element={<Navigate to="/clients" replace />} />
     </Routes>

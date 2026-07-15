@@ -150,6 +150,7 @@ export default function AdminPage({ user }) {
               <th className="px-4 py-3">User</th>
               <th className="px-4 py-3">Role</th>
               <th className="px-4 py-3">Active</th>
+              <th className="px-4 py-3">Password</th>
             </tr>
           </thead>
           <tbody>
@@ -159,6 +160,7 @@ export default function AdminPage({ user }) {
                   <div className="font-medium">{u.name || '—'}</div>
                   <div className="text-muted text-xs">
                     {u.username ? `@${u.username}` : u.email}
+                    {u.has_password ? ' · password login' : ''}
                   </div>
                 </td>
                 <td className="px-4 py-3">
@@ -174,6 +176,34 @@ export default function AdminPage({ user }) {
                   >
                     {u.active ? 'Disable' : 'Enable'}
                   </button>
+                </td>
+                <td className="px-4 py-3">
+                  {u.username ? (
+                    <button
+                      type="button"
+                      className="btn-ghost text-xs"
+                      onClick={async () => {
+                        const pw = window.prompt(`New password for @${u.username} (min 8 chars)`);
+                        if (!pw) return;
+                        if (pw.length < 8) {
+                          toast.error('Password must be at least 8 characters');
+                          return;
+                        }
+                        try {
+                          await updateUser(u.id, { password: pw });
+                          toast.success(`Password updated for @${u.username}`);
+                        } catch (err) {
+                          toast.error(err.message);
+                        }
+                      }}
+                    >
+                      {u.has_password ? 'Reset password' : 'Set password'}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-muted">
+                      {u.oauth_provider === 'google' ? 'Google-only' : 'No password login'}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}

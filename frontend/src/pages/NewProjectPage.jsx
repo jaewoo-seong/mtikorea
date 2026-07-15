@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useToast } from '../components/Toast';
@@ -31,6 +31,8 @@ export default function NewProjectPage() {
   const [timeBudgetMinutes, setTimeBudgetMinutes] = useState(60);
   const [cleaning, setCleaning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [contextFiles, setContextFiles] = useState([]);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     api.clients.list().then((d) => setClients(d.clients)).catch(() => {});
@@ -68,6 +70,15 @@ export default function NewProjectPage() {
         timeBudgetMinutes,
         desiredOutput: desiredOutput.trim() || null,
       });
+      if (contextFiles.length) {
+        try {
+          await api.projects.upload(project.id, contextFiles);
+        } catch (err) {
+          toast.error(`Project created, but file upload failed: ${err.message}`);
+          navigate(`/projects/${project.id}`);
+          return;
+        }
+      }
       toast.success('Project created');
       navigate(`/projects/${project.id}`);
     } catch (err) {
@@ -76,14 +87,25 @@ export default function NewProjectPage() {
     }
   }
 
+  function onPickFiles(e) {
+    const picked = Array.from(e.target.files || []);
+    setContextFiles((prev) => [...prev, ...picked]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function removeFile(idx) {
+    setContextFiles((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   return (
     <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="font-display text-3xl font-semibold">New project</h1>
         <p className="text-sm text-muted mt-1">
-          Set a title, a goal, and a time budget. The main agent plans its own agenda and
-          sub-agent allocation once you hit Start, then keeps refining until time runs out —
-          wrapping up with a summary instead of stopping mid-thought.
+          Set a title, a goal, and a time budget. This creates a draft you can review — the main
+          agent only plans its agenda and sub-agent allocation, and starts working, once you click
+          Start on the project page. It then keeps refining until time runs out, wrapping up with a
+          summary instead of stopping mid-thought.
         </p>
       </div>
 
@@ -168,6 +190,44 @@ export default function NewProjectPage() {
         </div>
 
         <div className="card p-5 space-y-3">
+          <div>
+            <span className="text-xs font-medium text-muted uppercase tracking-wide">
+              Context files (optional)
+            </span>
+            <p className="text-xs text-muted mt-0.5">
+              Attach reference files the agent should read before it starts — they'll show up in
+              Documents once the project is created.
+            </p>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="input"
+            onChange={onPickFiles}
+          />
+          {contextFiles.length > 0 && (
+            <ul className="space-y-1">
+              {contextFiles.map((f, i) => (
+                <li
+                  key={`${f.name}-${i}`}
+                  className="flex items-center justify-between text-xs bg-slate-50 border border-line rounded px-2 py-1"
+                >
+                  <span className="truncate">{f.name}</span>
+                  <button
+                    type="button"
+                    className="text-muted hover:text-danger ml-2 shrink-0"
+                    onClick={() => removeFile(i)}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="card p-5 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted uppercase tracking-wide inline-flex items-center gap-1.5">
               <IconClock width={13} height={13} /> Time budget
@@ -215,7 +275,11 @@ export default function NewProjectPage() {
 
         <div className="flex gap-2">
           <button className="btn-primary" type="submit" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create draft project'}
+            {submitting
+              ? contextFiles.length
+                ? 'Creating & uploading…'
+                : 'Creating…'
+              : 'Create draft — review before Start'}
           </button>
         </div>
       </form>

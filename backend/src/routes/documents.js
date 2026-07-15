@@ -166,7 +166,7 @@ function textToDocxChildren(text) {
 
 router.get('/', async (req, res, next) => {
   try {
-    const { clientId, projectId, q, visibility } = req.query;
+    const { clientId, projectId, q, visibility, folderId } = req.query;
     const params = [req.user.org_id];
     // Default: only approved shared docs (hide staged temp outputs)
     const vis = visibility || 'shared';
@@ -188,6 +188,12 @@ router.get('/', async (req, res, next) => {
     if (projectId) {
       params.push(projectId);
       sql += ` AND d.project_id = $${params.length}`;
+    }
+    if (folderId === 'root') {
+      sql += ` AND d.folder_id IS NULL`;
+    } else if (folderId) {
+      params.push(folderId);
+      sql += ` AND d.folder_id = $${params.length}`;
     }
     if (q) {
       params.push(`%${q}%`);
@@ -288,6 +294,7 @@ router.patch('/:id', async (req, res, next) => {
       description: 'description',
       clientId: 'client_id',
       projectId: 'project_id',
+      folderId: 'folder_id',
     };
     const updates = [];
     const params = [];

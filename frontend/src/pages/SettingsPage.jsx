@@ -40,10 +40,14 @@ function StatusList({ title, rows, labelKey = 'status' }) {
   );
 }
 
-export default function SettingsPage() {
+export default function SettingsPage({ user }) {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
+  const [pwMsg, setPwMsg] = useState('');
+  const [pwErr, setPwErr] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,10 +67,92 @@ export default function SettingsPage() {
     };
   }, []);
 
+  async function changePassword(e) {
+    e.preventDefault();
+    setPwMsg('');
+    setPwErr('');
+    if (pwForm.newPassword !== pwForm.confirm) {
+      setPwErr('New password and confirmation do not match');
+      return;
+    }
+    if (pwForm.newPassword.length < 8) {
+      setPwErr('New password must be at least 8 characters');
+      return;
+    }
+    setPwSaving(true);
+    try {
+      await api.settings.changePassword({
+        currentPassword: pwForm.currentPassword,
+        newPassword: pwForm.newPassword,
+      });
+      setPwMsg('Password updated');
+      setPwForm({ currentPassword: '', newPassword: '', confirm: '' });
+    } catch (err) {
+      setPwErr(err.message || 'Failed to update password');
+    } finally {
+      setPwSaving(false);
+    }
+  }
+
+  const accountCard = (
+    <div className="card p-5 space-y-4">
+      <div>
+        <h2 className="font-semibold">Account</h2>
+        <p className="text-sm text-muted mt-0.5">
+          {user?.username ? `@${user.username}` : user?.email}
+          {user?.role ? ` · ${user.role}` : ''}
+        </p>
+      </div>
+      {user?.has_password ? (
+        <form onSubmit={changePassword} className="grid md:grid-cols-3 gap-3 max-w-3xl">
+          <input
+            className="input"
+            type="password"
+            required
+            autoComplete="current-password"
+            placeholder="Current password"
+            value={pwForm.currentPassword}
+            onChange={(e) => setPwForm({ ...pwForm, currentPassword: e.target.value })}
+          />
+          <input
+            className="input"
+            type="password"
+            required
+            autoComplete="new-password"
+            placeholder="New password (min 8)"
+            value={pwForm.newPassword}
+            onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })}
+          />
+          <input
+            className="input"
+            type="password"
+            required
+            autoComplete="new-password"
+            placeholder="Confirm new password"
+            value={pwForm.confirm}
+            onChange={(e) => setPwForm({ ...pwForm, confirm: e.target.value })}
+          />
+          <button className="btn-primary md:col-span-3 inline-flex items-center gap-2" type="submit" disabled={pwSaving}>
+            {pwSaving && <IconLoader width={14} height={14} />}
+            {pwSaving ? 'Saving…' : 'Update password'}
+          </button>
+          {pwMsg && <p className="text-sm text-success md:col-span-3">{pwMsg}</p>}
+          {pwErr && <p className="text-sm text-danger md:col-span-3">{pwErr}</p>}
+        </form>
+      ) : (
+        <p className="text-sm text-muted">
+          No password on this account (Google sign-in). Ask an admin to create a local username account
+          if you need password login.
+        </p>
+      )}
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="space-y-6">
         <h1 className="font-display text-3xl font-semibold">Settings</h1>
+        {accountCard}
         <div className="flex items-center gap-2 text-sm text-muted">
           <IconLoader width={16} height={16} />
           Loading stats…
@@ -79,6 +165,7 @@ export default function SettingsPage() {
     return (
       <div className="space-y-6">
         <h1 className="font-display text-3xl font-semibold">Settings</h1>
+        {accountCard}
         <div className="card p-5 border border-red-200 bg-red-50 flex items-center gap-2 text-sm text-danger">
           <IconAlert width={18} height={18} />
           {error}
@@ -98,7 +185,7 @@ export default function SettingsPage() {
 
   const docsTotal = documents.byVisibility.reduce((s, r) => s + Number(r.count || 0), 0);
   const tasksTotal = tasks.byStatus.reduce((s, r) => s + Number(r.count || 0), 0);
-  const tokenPct = pct(tokens.totalUsed, tokens.totalBudget);
+  const legacyPct = pct(tokens.legacyUsed, tokens.legacyBudget);
   const maxModelTokens = Math.max(1, ...tokensByModel.map((m) => Number(m.tokens) || 0));
   const maxEventCount = Math.max(1, ...events.byStage.map((e) => Number(e.count) || 0));
 
@@ -106,27 +193,45 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-3xl font-semibold">Settings</h1>
-        <p className="text-sm text-muted mt-1">Operational overview — token usage, agent activity, and system stats.</p>
+        <p className="text-sm text-muted mt-1">
+          Account password, operational overview — token usage, agent activity, and system stats.
+        </p>
       </div>
+
+      {accountCard}
 
       <div className="card p-5 space-y-4">
         <div className="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm">
           <Tile label="Total projects" value={projects.total} />
           <Tile
-            label="Tokens used / budget"
-            value={`${tokens.totalUsed.toLocaleString()}/${tokens.totalBudget.toLocaleString()}`}
-            sub={`${tokenPct}% of budget`}
+            label="Tokens used"
+            value={tokens.totalUsed.toLocaleString()}
+            sub={
+              tokens.legacyCappedCount > 0
+                ? `${tokens.legacyCappedCount} legacy project(s) had a token cap`
+                : 'No cap — tracked for cost visibility'
+            }
           />
           <Tile label="Documents" value={docsTotal} />
           <Tile label="Tasks" value={tasksTotal} />
           <Tile label="Active users" value={users.activeCount} />
         </div>
-        <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-700"
-            style={{ width: `${tokenPct}%` }}
-          />
-        </div>
+        {tokens.legacyCappedCount > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs text-muted">
+              <span>Legacy token-capped projects</span>
+              <span className="font-mono">
+                {tokens.legacyUsed.toLocaleString()}/{tokens.legacyBudget.toLocaleString()} ({legacyPct}%)
+              </span>
+            </div>
+            <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-700"
+                style={{ width: `${legacyPct}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-2 gap-5">
@@ -135,21 +240,26 @@ export default function SettingsPage() {
           {!tokens.byProject.length && <div className="text-sm text-muted">No projects yet</div>}
           <div className="space-y-3">
             {tokens.byProject.map((p) => {
-              const p2 = pct(p.tokens_used, p.token_budget);
+              const capped = p.token_budget != null;
+              const p2 = capped ? pct(p.tokens_used, p.token_budget) : null;
               return (
                 <div key={p.id} className="space-y-1">
                   <div className="flex items-center justify-between text-sm">
                     <span className="truncate pr-2">{p.title}</span>
                     <span className="font-mono text-xs text-muted shrink-0">
-                      {Number(p.tokens_used).toLocaleString()}/{Number(p.token_budget).toLocaleString()} ({p2}%)
+                      {capped
+                        ? `${Number(p.tokens_used).toLocaleString()}/${Number(p.token_budget).toLocaleString()} (${p2}%)`
+                        : `${Number(p.tokens_used).toLocaleString()} · no cap`}
                     </span>
                   </div>
-                  <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${p2 >= 100 ? 'bg-danger' : 'bg-primary'}`}
-                      style={{ width: `${p2}%` }}
-                    />
-                  </div>
+                  {capped && (
+                    <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${p2 >= 100 ? 'bg-danger' : 'bg-primary'}`}
+                        style={{ width: `${p2}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}

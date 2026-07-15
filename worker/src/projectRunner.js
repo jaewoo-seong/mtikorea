@@ -105,6 +105,23 @@ async function runProjectStep(pool, project) {
         [p.id]
       );
 
+      // Mid-project steering: pick up any chat messages the user sent since the last cycle.
+      // Marked consumed immediately so each one is delivered as "new" exactly once — it keeps
+      // being remembered afterward via checkpoint.memory.user_instructions (see buildMemory).
+      const pendingMsgRes = await client.query(
+        `SELECT id, content FROM project_messages
+         WHERE project_id = $1 AND role = 'user' AND consumed_at IS NULL
+         ORDER BY created_at ASC LIMIT 20`,
+        [p.id]
+      );
+      const pendingUserInstructions = pendingMsgRes.rows.map((r) => r.content);
+      if (pendingMsgRes.rows.length) {
+        await client.query(
+          `UPDATE project_messages SET consumed_at = now() WHERE id = ANY($1::uuid[])`,
+          [pendingMsgRes.rows.map((r) => r.id)]
+        );
+      }
+
       await writeCheckpoint(client, p.id, {
         stage: 'queued',
         detail: `Iteration ${cycle} starting (${i + 1}/${maxIters} this claim)`,
@@ -127,12 +144,15 @@ async function runProjectStep(pool, project) {
       const subAgentPool = await prepareSubAgentPool(client, p.org_id);
 
       const started = Date.now();
-      const result = await runOrchestratorCycle(
-        { ...p, checkpoint: mergeCheckpoint(p.checkpoint, { cycle }) },
-        {
+      let result;
+      try {
+        result = await runOrchestratorCycle(
+          { ...p, checkpoint: mergeCheckpoint(p.checkpoint, { cycle }) },
+          {
           step: cycle,
           fileNames,
           subAgentPool,
+          pendingUserInstructions,
           subAgentKeyOps: {
             markUsed: (keyId) => markKeyUsed(client, keyId),
             markUnhealthy: (keyId, err) => markKeyUnhealthy(client, keyId, err),
@@ -192,8 +212,30 @@ async function runProjectStep(pool, project) {
               evt.model || 'orchestrator'
             );
           },
-        }
-      );
+          }
+        );
+      } catch (err) {
+        // An unexpected throw (bug, malformed provider response, etc.) must not leave the
+        // project silently claimed and stuck for the 5-minute staleness window with zero
+        // visibility — route it through the existing fatal_error path so it's paused and
+        // surfaced to the user instead.
+        console.error('[Worker] orchestrator cycle threw', err);
+        result = {
+          status: 'blocked',
+          summary: null,
+          tokens: 0,
+          progress_pct: null,
+          next_focus: null,
+          outputs: [],
+          mode: 'openrouter',
+          logs: [],
+          error: { code: 'fatal_error', message: err.message, stage: 'orchestrator_exception' },
+          rateLimited: false,
+          sub_ok: undefined,
+          sub_fail: undefined,
+          review: null,
+        };
+      }
       const duration = Date.now() - started;
 
       // First-ever cycle: capture the initial plan (agenda + sub-agent allocation) as
@@ -279,7 +321,7 @@ async function runProjectStep(pool, project) {
       };
       const metrics = projectProgress(updated, new Date(), result.progress_pct);
 
-      const memory = buildMemory(p.checkpoint, result);
+      const memory = buildMemory(p.checkpoint, result, pendingUserInstructions);
       const endStage = result.error ? 'error' : 'idle';
       const checkpointPatch = {
         last_step: cycle,
@@ -430,15 +472,22 @@ function safeJson(s) {
   }
 }
 
-function buildMemory(checkpoint, result) {
+function buildMemory(checkpoint, result, newUserInstructions = []) {
   const prev = mergeCheckpoint(checkpoint).memory || {};
   const ideas = [
     ...(Array.isArray(prev.idea_backlog) ? prev.idea_backlog : []),
     ...(result.review?.new_ideas || []),
   ].slice(-20);
+  // User steering notes persist here so the agent keeps acting on them across every future
+  // cycle, not just the one where they arrived (see contextBlock in orchestrator.js).
+  const userInstructions = [
+    ...(Array.isArray(prev.user_instructions) ? prev.user_instructions : []),
+    ...newUserInstructions,
+  ].slice(-20);
   return {
     last_critique: result.review?.critique || prev.last_critique || null,
     idea_backlog: ideas,
+    user_instructions: userInstructions,
     go_back_to: result.review?.go_back_to || prev.go_back_to || 'plan',
     last_status: result.status,
   };

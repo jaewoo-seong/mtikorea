@@ -135,7 +135,9 @@ async function loadUser(req, res, next) {
       return next();
     }
     const { rows } = await query(
-      'SELECT id, org_id, email, name, avatar_url, role, active FROM users WHERE id = $1',
+      `SELECT id, org_id, email, name, avatar_url, role, active, username, oauth_provider,
+              (password_hash IS NOT NULL) AS has_password
+       FROM users WHERE id = $1`,
       [req.session.userId]
     );
     req.user = rows[0] && rows[0].active ? rows[0] : null;

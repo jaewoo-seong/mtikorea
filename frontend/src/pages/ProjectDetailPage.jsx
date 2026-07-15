@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useToast } from '../components/Toast';
 import DocumentPreview from '../components/DocumentPreview';
+import ConfirmButton from '../components/ConfirmButton';
 import {
   PIPELINE,
   buildDiagnostics,
@@ -239,6 +240,26 @@ export default function ProjectDetailPage() {
     await api.documents.reject(docId);
     setMsg('Staged document discarded');
     await load();
+  }
+
+  async function approveAllStaged() {
+    try {
+      const { approved } = await api.projects.approveAllStaged(id);
+      toast.success(`Approved ${approved} document(s) → Shared docs`);
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  }
+
+  async function rejectAllStaged() {
+    try {
+      const { rejected } = await api.projects.rejectAllStaged(id);
+      toast.success(`Discarded ${rejected} staged document(s)`);
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   async function removeProject() {
@@ -638,8 +659,13 @@ export default function ProjectDetailPage() {
             </div>
           </div>
           <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
-            {eventGroups.map((group) => {
-              const collapsed = collapsedCycles.has(group.id);
+            {eventGroups.map((group, idx) => {
+              // Only the most recent few cycles render expanded by default — with a long-running
+              // project this list can hold hundreds of events, and expanding all of them at once
+              // made the panel visibly unresponsive to scroll/click. Toggling a group flips it
+              // relative to its own default instead of a single global collapsed/expanded state.
+              const defaultCollapsed = idx >= 3;
+              const collapsed = collapsedCycles.has(group.id) ? !defaultCollapsed : defaultCollapsed;
               return (
                 <div key={group.id} className="space-y-2">
                   <button
@@ -836,6 +862,24 @@ export default function ProjectDetailPage() {
               </Link>
             </div>
             <p className="text-xs text-muted mb-3">Agent outputs stay here until you approve → Shared docs.</p>
+            {stagedDocuments.length > 1 && (
+              <div className="flex flex-wrap items-center gap-2 mb-3 pb-3 border-b border-line">
+                <span className="text-xs text-muted mr-auto">{stagedDocuments.length} pending</span>
+                <button
+                  type="button"
+                  className="btn-primary text-xs py-1 inline-flex items-center gap-1"
+                  onClick={approveAllStaged}
+                >
+                  <IconCheck width={12} height={12} /> Approve all
+                </button>
+                <ConfirmButton
+                  onConfirm={rejectAllStaged}
+                  className="btn-ghost text-xs py-1 text-danger inline-flex items-center gap-1"
+                >
+                  <IconX width={12} height={12} /> Discard all
+                </ConfirmButton>
+              </div>
+            )}
             <div className="space-y-2 max-h-[28rem] overflow-y-auto">
               {stagedDocuments.map((d) => (
                 <div key={d.id} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">

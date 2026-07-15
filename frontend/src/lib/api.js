@@ -39,6 +39,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
+  devBypass: () => request('/auth/dev-bypass', { method: 'POST' }),
   login: (username, password) =>
     request('/auth/login', {
       method: 'POST',
@@ -109,6 +110,10 @@ export const api = {
       [...files].forEach((f) => fd.append('files', f));
       return request(`/api/projects/${id}/files`, { method: 'POST', body: fd });
     },
+    approveAllStaged: (id) =>
+      request(`/api/projects/${id}/staged/approve-all`, { method: 'POST', body: '{}' }),
+    rejectAllStaged: (id) =>
+      request(`/api/projects/${id}/staged/reject-all`, { method: 'POST', body: '{}' }),
   },
 
   documents: {
@@ -128,6 +133,14 @@ export const api = {
       request(`/api/documents/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     approve: (id) => request(`/api/documents/${id}/approve`, { method: 'POST', body: '{}' }),
     reject: (id) => request(`/api/documents/${id}/reject`, { method: 'POST', body: '{}' }),
+  },
+
+  documentFolders: {
+    list: () => request('/api/document-folders'),
+    create: (body) => request('/api/document-folders', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) =>
+      request(`/api/document-folders/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    delete: (id) => request(`/api/document-folders/${id}`, { method: 'DELETE' }),
   },
 
   users: {
@@ -174,5 +187,7 @@ export const api = {
 
   settings: {
     stats: () => request('/api/settings/stats'),
+    changePassword: (body) =>
+      request('/api/settings/password', { method: 'POST', body: JSON.stringify(body) }),
   },
 };
