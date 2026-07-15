@@ -57,6 +57,10 @@ Full Railway + keys guide: [docs/RAILWAY_SETUP.md](docs/RAILWAY_SETUP.md)
 ## Agents
 
 - Draft projects use **zero tokens** until **Start**
-- Worker loop uses `claim_next_project()` (mtiV2 claim pattern, rewritten)
-- **Stop** sets status `paused` and releases claim
-- Set `OPENROUTER_API_KEY` for LLM ticks; without it worker still advances with local steps
+- Background **Worker** service loops: `claim_next_project()` → one orchestrator cycle → release
+- **Main model** (OpenRouter): `OPENROUTER_MAIN_MODEL` default `anthropic/claude-haiku-4.5`
+- **Free sub-agents**: `OPENROUTER_SUB_MODELS` (research / draft / critique in parallel)
+- Main identifies outputs; synth stages markdown docs for Approve → Shared docs
+- Agent may push `progress_pct`; merged with token/time/due floors
+- **Stop** → `paused` + release claim
+- Set `OPENROUTER_API_KEY` on local `.env` and Railway **Worker** Variables ([keys](https://openrouter.ai/keys)); without key, local synthetic cycles still run

@@ -1,8 +1,10 @@
 /**
- * Advances one claimed project. Respects Stop, token budget, allotted hours, and due dates.
+ * Advances one claimed project through a full orchestrator cycle
+ * (Haiku main → free sub-agents → synth), then releases the claim.
  */
 const { projectProgress } = require('../../backend/src/lib/projectProgress');
 const { saveBuffer } = require('../../backend/src/lib/storage');
+const { runOrchestratorCycle } = require('./orchestrator');
 
 async function runProjectStep(pool, project) {
   const client = await pool.connect();
@@ -62,103 +64,163 @@ async function runProjectStep(pool, project) {
     );
     const step = stepRes.rows[0].n;
 
+    const filesRes = await client.query(
+      `SELECT filename FROM project_files WHERE project_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      [p.id]
+    );
+    const recentRes = await client.query(
+      `SELECT phase, action, left(detail, 120) AS detail
+       FROM agent_work_log WHERE project_id = $1
+       ORDER BY step_number DESC LIMIT 12`,
+      [p.id]
+    );
+
     const started = Date.now();
-    const { detail, tokens, phase, action, summary } = await executeAgentTick(p, step);
+    const cycle = await runOrchestratorCycle(p, {
+      step,
+      fileNames: filesRes.rows.map((r) => r.filename),
+      recentLog: recentRes.rows.map((r) => `${r.phase}:${r.action}:${r.detail || ''}`),
+    });
     const duration = Date.now() - started;
 
-    await log(client, p.id, phase, action, detail, tokens, duration, step);
+    // Persist per-phase logs (share cycle step number; sub_agent = model slug)
+    if (cycle.logs?.length) {
+      for (const entry of cycle.logs) {
+        await log(
+          client,
+          p.id,
+          entry.phase,
+          entry.action,
+          entry.detail,
+          entry.tokens || 0,
+          Math.round(duration / cycle.logs.length),
+          step,
+          entry.subAgent || 'orchestrator'
+        );
+      }
+    } else {
+      await log(
+        client,
+        p.id,
+        'orchestration',
+        'cycle',
+        cycle.detail || cycle.summary || `Cycle ${step}`,
+        cycle.tokens || 0,
+        duration,
+        step,
+        'orchestrator'
+      );
+    }
 
     const updated = {
       ...p,
-      tokens_used: Number(p.tokens_used) + tokens,
+      tokens_used: Number(p.tokens_used) + (cycle.tokens || 0),
     };
-    const metrics = projectProgress(updated, new Date());
+    const metrics = projectProgress(updated, new Date(), cycle.progress_pct);
+
+    const checkpointPatch = {
+      last_step: step,
+      status: cycle.status,
+      next_focus: cycle.next_focus,
+      last_summary: cycle.summary,
+      main_model: process.env.OPENROUTER_MAIN_MODEL || process.env.OPENROUTER_WORKER_MODEL || 'anthropic/claude-haiku-4.5',
+    };
 
     await client.query(
       `UPDATE projects SET
          tokens_used = tokens_used + $2,
          progress_pct = $3,
-         checkpoint = jsonb_set(COALESCE(checkpoint, '{}'::jsonb), '{last_step}', to_jsonb($4::int), true),
+         checkpoint = COALESCE(checkpoint, '{}'::jsonb) || $4::jsonb,
          claimed_by = NULL,
          claimed_at = NULL,
          updated_at = now()
        WHERE id = $1 AND status = 'running'`,
-      [p.id, tokens, metrics.progressPct, step]
+      [p.id, cycle.tokens || 0, metrics.progressPct, JSON.stringify(checkpointPatch)]
     );
 
-    // Chat-style assistant response
-    await client.query(
-      `INSERT INTO project_messages (project_id, org_id, role, content, error_code)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [
-        p.id,
-        p.org_id,
-        action.includes('error') || action.includes('exception') ? 'error' : 'assistant',
-        detail || summary || `(step ${step})`,
-        action.includes('error') || action.includes('exception') ? action : null,
-      ]
-    );
-
-    if (summary) {
+    if (cycle.error) {
       await client.query(
-        `INSERT INTO agent_task_results (project_id, category, title, summary, confidence_score)
-         VALUES ($1, 'progress', $2, $3, 0.6)`,
-        [p.id, `Step ${step}`, summary]
+        `INSERT INTO project_messages (project_id, org_id, role, content, error_code)
+         VALUES ($1,$2,'error',$3,$4)`,
+        [p.id, p.org_id, cycle.error.message, cycle.error.code || 'orchestrator_error']
       );
-
-      // Stage document in hidden temp until user approves → shared docs
-      if (step % 2 === 0) {
-        const title = `Agent output · ${p.title} · step ${step}`;
-        const saved = saveBuffer(
-          `projects/${p.id}/staged`,
-          `agent-output-step-${step}.txt`,
-          Buffer.from(summary, 'utf8')
-        );
-        const doc = await client.query(
-          `INSERT INTO shared_documents (
-             org_id, client_id, project_id, title, description, filename, mime_type, size_bytes,
-             storage_path, uploaded_by, visibility, source
-           ) VALUES ($1,$2,$3,$4,$5,$6,'text/plain',$7,$8,NULL,'staged','agent')
-           RETURNING id`,
-          [
-            p.org_id,
-            p.client_id,
-            p.id,
-            title,
-            summary.slice(0, 500),
-            `agent-output-step-${step}.txt`,
-            saved.size,
-            saved.storagePath,
-          ]
-        );
-        await client.query(
-          `INSERT INTO project_messages (project_id, org_id, role, content, document_id)
-           VALUES ($1,$2,'assistant',$3,$4)`,
-          [
-            p.id,
-            p.org_id,
-            `Staged document ready for approval: **${title}**`,
-            doc.rows[0].id,
-          ]
-        );
-      }
     }
 
-    if (metrics.progressPct >= 100) {
+    if (cycle.summary) {
+      await client.query(
+        `INSERT INTO project_messages (project_id, org_id, role, content, error_code)
+         VALUES ($1,$2,'assistant',$3,NULL)`,
+        [p.id, p.org_id, cycle.summary]
+      );
+
+      await client.query(
+        `INSERT INTO agent_task_results (project_id, category, title, summary, confidence_score)
+         VALUES ($1, 'progress', $2, $3, 0.7)`,
+        [p.id, `Cycle ${step} · ${cycle.status}`, cycle.summary]
+      );
+    }
+
+    for (const out of cycle.outputs || []) {
+      const safeName = `${out.title.replace(/[^\w.\-]+/g, '_').slice(0, 80)}.md`;
+      const saved = saveBuffer(
+        `projects/${p.id}/staged`,
+        safeName,
+        Buffer.from(out.content_markdown, 'utf8')
+      );
+      const doc = await client.query(
+        `INSERT INTO shared_documents (
+           org_id, client_id, project_id, title, description, filename, mime_type, size_bytes,
+           storage_path, uploaded_by, visibility, source
+         ) VALUES ($1,$2,$3,$4,$5,$6,'text/markdown',$7,$8,NULL,'staged','agent')
+         RETURNING id`,
+        [
+          p.org_id,
+          p.client_id,
+          p.id,
+          out.title,
+          out.content_markdown.slice(0, 500),
+          safeName,
+          saved.size,
+          saved.storagePath,
+        ]
+      );
+      await client.query(
+        `INSERT INTO project_messages (project_id, org_id, role, content, document_id)
+         VALUES ($1,$2,'assistant',$3,$4)`,
+        [
+          p.id,
+          p.org_id,
+          `Staged document ready for approval: **${out.title}**`,
+          doc.rows[0].id,
+        ]
+      );
+    }
+
+    if (cycle.status === 'done' || metrics.progressPct >= 100) {
       await client.query(
         `UPDATE projects SET status = 'completed', completed_at = now(), claimed_by = NULL,
-           progress_pct = 100, updated_at = now()
+           progress_pct = GREATEST(progress_pct, 100), updated_at = now()
          WHERE id = $1 AND status = 'running'`,
         [p.id]
       );
-      await log(client, p.id, 'control', 'schedule_complete', 'Progress reached 100%', 0, 0, step + 1);
+      await log(client, p.id, 'control', 'cycle_complete', 'Orchestrator marked done / 100%', 0, 0, step + 1);
     }
   } finally {
     client.release();
   }
 }
 
-async function log(client, projectId, phase, action, detail, tokens, durationMs = 0, step = null) {
+async function log(
+  client,
+  projectId,
+  phase,
+  action,
+  detail,
+  tokens,
+  durationMs = 0,
+  step = null,
+  subAgent = 'orchestrator'
+) {
   let stepNumber = step;
   if (stepNumber == null) {
     const r = await client.query(
@@ -170,86 +232,8 @@ async function log(client, projectId, phase, action, detail, tokens, durationMs 
   await client.query(
     `INSERT INTO agent_work_log (project_id, step_number, phase, action, detail, tokens_used, duration_ms, sub_agent)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [projectId, stepNumber, phase, action, detail, tokens, durationMs, 'project-worker']
+    [projectId, stepNumber, phase, action, detail, tokens, durationMs, subAgent]
   );
-}
-
-async function executeAgentTick(project, step) {
-  const key = process.env.OPENROUTER_API_KEY;
-  const scheduleNote = [
-    project.allotted_hours != null ? `Allotted hours: ${project.allotted_hours}` : null,
-    project.due_at ? `Due: ${project.due_at}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
-  if (!key) {
-    const tokens = 120 + step * 10;
-    return {
-      phase: 'orchestration',
-      action: 'local_progress',
-      detail: `Local agent tick ${step} on "${project.title}". Goal: ${project.goal || '(none)'}. ${scheduleNote}`,
-      summary: `Completed work slice ${step}${scheduleNote ? ` (${scheduleNote})` : ''}`,
-      tokens,
-    };
-  }
-
-  try {
-    const prompt = [
-      `You are an MTI project worker agent.`,
-      `Project: ${project.title}`,
-      `Goal: ${project.goal || 'n/a'}`,
-      `Step: ${step}`,
-      scheduleNote,
-      `Checkpoint: ${JSON.stringify(project.checkpoint || {})}`,
-      `Work within the time budget. Return a short progress update (3-6 sentences).`,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.APP_URL || 'http://localhost:5173',
-        'X-Title': 'MTI CRM Worker',
-      },
-      body: JSON.stringify({
-        model: process.env.OPENROUTER_WORKER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 400,
-      }),
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      return {
-        phase: 'orchestration',
-        action: 'llm_error',
-        detail: `OpenRouter ${resp.status}: ${text.slice(0, 400)}`,
-        summary: null,
-        tokens: 50,
-      };
-    }
-    const data = await resp.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    const tokens = data.usage?.total_tokens || 200;
-    return {
-      phase: 'sub_agent_call',
-      action: 'openrouter_tick',
-      detail: content,
-      summary: content.slice(0, 280),
-      tokens,
-    };
-  } catch (err) {
-    return {
-      phase: 'orchestration',
-      action: 'llm_exception',
-      detail: err.message,
-      summary: null,
-      tokens: 20,
-    };
-  }
 }
 
 module.exports = { runProjectStep };

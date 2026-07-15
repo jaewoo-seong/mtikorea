@@ -28,9 +28,10 @@ Nothing is on a public Railway domain until you create the project and deploy.
 
 | Key | Why |
 |-----|-----|
-| `OPENROUTER_API_KEY` | Real LLM ticks after Project **Start** |
-| `ANTHROPIC_API_KEY` | Future orchestration (optional) |
-| `TAVILY_API_KEY` | Web research (optional) |
+| `OPENROUTER_API_KEY` | **Worker** — Haiku main + free sub-agents after Project **Start** ([openrouter.ai/keys](https://openrouter.ai/keys)) |
+| `OPENROUTER_MAIN_MODEL` | Default `anthropic/claude-haiku-4.5` (paid via OpenRouter) |
+| `OPENROUTER_SUB_MODELS` | Comma list of free model slugs for sub-agents |
+| `TAVILY_API_KEY` | Web research (optional, unused in v1) |
 
 ### Later (skip until needed)
 
@@ -73,10 +74,26 @@ PORT=4000
 
 4. **Volume:** mount to `/var/data` on API (and Worker if files used there)
 
-### 3. Worker service
+### 3. Worker service (background agents)
 1. Second service, same repo
 2. Start: `npm install --prefix backend && npm install --prefix worker && npm run start:worker`
-3. Same `DATABASE_URL`, `STORAGE_PATH`, `OPENROUTER_API_KEY` (optional), `WORKER_PORT` / `PORT`
+3. Variables (same volume / DB as API):
+
+```text
+DATABASE_URL=<Postgres reference>
+STORAGE_PATH=/var/data
+APP_URL=https://<your-app-host>
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MAIN_MODEL=anthropic/claude-haiku-4.5
+OPENROUTER_SUB_MODELS=meta-llama/llama-3.3-70b-instruct:free,google/gemma-3-27b-it:free,mistralai/mistral-small-3.1-24b-instruct:free
+WORKER_MAX_CONCURRENT=3
+WORKER_SUBAGENT_CONCURRENCY=3
+WORKER_PORT=4001
+```
+
+4. How it runs: loop → `claim_next_project` → one **orchestrator cycle** (Haiku plans → free subs in parallel → Haiku synth → stage docs / push progress) → release claim → repeat. UI: Project **Start** → chat + work log update; **Approve** staged docs → Shared docs.
+
+Without `OPENROUTER_API_KEY`, worker still advances with local synthetic cycles (no real LLM).
 
 ### 4. Frontend
 - **Option A (simplest):** API already serves `frontend/dist` after `npm run build`. One public domain = API service.
@@ -115,6 +132,19 @@ Wired end-to-end in code, but “production level” still needs:
 - [ ] Git commit + GitHub remote deploy pipeline
 
 ---
+
+## Fix Gmail `invalid_grant`
+
+Means the **refresh token** is bad (revoked, expired, or minted with a different Client ID).
+
+1. Railway → API Variables → **delete** `GMAIL_REFRESH_TOKEN` (and empty `GMAIL_USER` if it was only for that old token)
+2. Confirm `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` are the current Web client
+3. Redeploy API
+4. In the app: **Reconnect Gmail** → `/auth/google` → full Google consent
+5. Accept Gmail scopes — app stores a fresh refresh token in `email_accounts`
+6. Email → **Sync** again
+
+Do **not** reuse an old refresh token from another project/computer.
 
 ## Fix Google `unauthorized_client`
 

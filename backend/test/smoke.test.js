@@ -42,4 +42,20 @@ describe('MTI CRM scaffold', () => {
     assert.match(worker, /claim_next_project/);
     assert.equal(worker.includes('supabase'), false);
   });
+
+  it('worker has Haiku orchestrator + OpenRouter client', () => {
+    const runner = fs.readFileSync(
+      path.join(__dirname, '../../worker/src/projectRunner.js'),
+      'utf8'
+    );
+    const orch = fs.readFileSync(
+      path.join(__dirname, '../../worker/src/orchestrator.js'),
+      'utf8'
+    );
+    assert.match(runner, /runOrchestratorCycle/);
+    assert.match(orch, /anthropic\/claude-haiku-4\.5|getMainModel/);
+    assert.ok(
+      fs.existsSync(path.join(__dirname, '../../worker/src/llm/openrouter.js'))
+    );
+  });
 });
