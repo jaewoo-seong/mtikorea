@@ -9,7 +9,7 @@ router.use(requireAuth);
 router.get('/', async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT id, email, name, role, avatar_url, active
+      `SELECT id, email, username, name, role, avatar_url, active
        FROM users WHERE org_id = $1 AND active = true ORDER BY name NULLS LAST, email`,
       [req.user.org_id]
     );

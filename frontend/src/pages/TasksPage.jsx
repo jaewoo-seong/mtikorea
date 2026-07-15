@@ -30,6 +30,23 @@ function formatDue(dueAt) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+/** Mentionable handle for a user — matches the backend's username-or-email-prefix fallback. */
+function handleOf(u) {
+  return (u.username || u.email.split('@')[0]).toLowerCase();
+}
+
+/** Bold/colored @handle tokens inside a comment body. */
+function renderCommentBody(body) {
+  const parts = body.split(/(@[a-zA-Z0-9_-]+)/g);
+  return parts.map((part, i) =>
+    /^@[a-zA-Z0-9_-]+$/.test(part) ? (
+      <span key={i} className="font-semibold text-primary">{part}</span>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
+
 export default function TasksPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [tasks, setTasks] = useState([]);
@@ -61,6 +78,7 @@ export default function TasksPage() {
   const [showRejectBox, setShowRejectBox] = useState(false);
   const [rejectNote, setRejectNote] = useState('');
   const [drawerBusy, setDrawerBusy] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState(null);
 
   const selectedTask = tasks.find((t) => t.id === selectedId) || null;
 
@@ -94,23 +112,37 @@ export default function TasksPage() {
     load().catch((e) => toast.error(e.message));
   }, [clientId, projectId]);
 
-  async function loadComments(taskId) {
-    setCommentsLoading(true);
+  // Live-ish board: poll the task list so status/assignment changes from teammates show up.
+  useEffect(() => {
+    const t = setInterval(() => load().catch(() => {}), 6000);
+    return () => clearInterval(t);
+  }, [clientId, projectId]);
+
+  async function loadComments(taskId, { silent = false } = {}) {
+    if (!silent) setCommentsLoading(true);
     try {
       const r = await api.tasks.comments.list(taskId);
       setComments(r.comments);
     } catch (e) {
-      toast.error(e.message);
+      if (!silent) toast.error(e.message);
     } finally {
-      setCommentsLoading(false);
+      if (!silent) setCommentsLoading(false);
     }
   }
+
+  // While the drawer is open, poll the thread so replies appear without reopening it.
+  useEffect(() => {
+    if (!selectedId) return undefined;
+    const t = setInterval(() => loadComments(selectedId, { silent: true }), 4000);
+    return () => clearInterval(t);
+  }, [selectedId]);
 
   function openTask(task) {
     setSelectedId(task.id);
     setShowRejectBox(false);
     setRejectNote('');
     setCommentText('');
+    setMentionQuery(null);
     loadComments(task.id);
   }
 
@@ -119,7 +151,32 @@ export default function TasksPage() {
     setComments([]);
     setShowRejectBox(false);
     setRejectNote('');
+    setMentionQuery(null);
   }
+
+  function onCommentTextChange(e) {
+    const val = e.target.value;
+    setCommentText(val);
+    const cursor = e.target.selectionStart ?? val.length;
+    const match = /@([a-zA-Z0-9_-]*)$/.exec(val.slice(0, cursor));
+    setMentionQuery(match ? match[1].toLowerCase() : null);
+  }
+
+  function pickMention(u) {
+    setCommentText((prev) => prev.replace(/@([a-zA-Z0-9_-]*)$/, `@${handleOf(u)} `));
+    setMentionQuery(null);
+  }
+
+  const mentionSuggestions =
+    mentionQuery === null
+      ? []
+      : users
+          .filter(
+            (u) =>
+              handleOf(u).includes(mentionQuery) ||
+              (u.name || '').toLowerCase().includes(mentionQuery)
+          )
+          .slice(0, 5);
 
   // ESC closes the drawer; lock body scroll while it's open.
   useEffect(() => {
@@ -180,6 +237,7 @@ export default function TasksPage() {
     if (!selectedId || !commentText.trim()) return;
     const text = commentText.trim();
     setCommentText('');
+    setMentionQuery(null);
     try {
       await api.tasks.comments.add(selectedId, text);
       await loadComments(selectedId);
@@ -551,7 +609,7 @@ export default function TasksPage() {
                           minute: '2-digit',
                         })}
                       </div>
-                      {c.body}
+                      {renderCommentBody(c.body)}
                     </div>
                   ))}
                   {!commentsLoading && !comments.length && (
@@ -561,12 +619,27 @@ export default function TasksPage() {
               </div>
             </div>
 
-            <form onSubmit={sendComment} className="flex gap-2 border-t border-line p-4 shrink-0">
+            <form onSubmit={sendComment} className="relative flex gap-2 border-t border-line p-4 shrink-0">
+              {mentionSuggestions.length > 0 && (
+                <div className="absolute bottom-full left-4 right-4 mb-1 card border border-line shadow-mid overflow-hidden">
+                  {mentionSuggestions.map((u) => (
+                    <button
+                      type="button"
+                      key={u.id}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center justify-between"
+                      onClick={() => pickMention(u)}
+                    >
+                      <span>{u.name || u.email}</span>
+                      <span className="text-xs text-muted font-mono">@{handleOf(u)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <input
                 className="input"
-                placeholder="Write a comment…"
+                placeholder="Write a comment… (@ to mention)"
                 value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
+                onChange={onCommentTextChange}
               />
               <button className="btn-primary shrink-0" type="submit">Send</button>
             </form>

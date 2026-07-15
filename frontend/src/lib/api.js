@@ -146,6 +146,7 @@ export const api = {
     approve: (id) => request(`/api/tasks/${id}/approve`, { method: 'POST', body: '{}' }),
     reject: (id, note) =>
       request(`/api/tasks/${id}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
+    unread: () => request('/api/tasks/unread'),
     comments: {
       list: (taskId) => request(`/api/tasks/${taskId}/comments`),
       add: (taskId, body) =>

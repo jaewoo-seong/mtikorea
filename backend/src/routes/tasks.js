@@ -5,6 +5,23 @@ const { requireAuth } = require('../lib/auth');
 const router = express.Router();
 router.use(requireAuth);
 
+const MENTION_RE = /@([a-zA-Z0-9_-]+)/g;
+
+/** Resolve @username tokens in a comment body to user ids within the same org. */
+async function resolveMentions(body, orgId) {
+  const handles = [...new Set([...body.matchAll(MENTION_RE)].map((m) => m[1].toLowerCase()))];
+  if (!handles.length) return [];
+  // Accounts without a set username (master admin, Google sign-ins) are still
+  // mentionable via the local part of their email as a fallback handle.
+  const { rows } = await query(
+    `SELECT id FROM users
+     WHERE org_id = $1
+       AND lower(COALESCE(username, split_part(email, '@', 1))) = ANY($2::text[])`,
+    [orgId, handles]
+  );
+  return rows.map((r) => r.id);
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const { clientId, projectId, status, assigneeId } = req.query;
@@ -154,6 +171,38 @@ router.delete('/:id', async (req, res, next) => {
   }
 });
 
+// Static path — must stay ahead of nothing in particular here, but keep above /:id/comments for clarity.
+router.get('/unread', async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT t.id AS task_id, t.title,
+              COUNT(c.id) FILTER (
+                WHERE c.author_id IS DISTINCT FROM $2
+                  AND c.created_at > COALESCE(r.last_read_at, '-infinity'::timestamptz)
+              )::int AS unread_count
+       FROM shared_tasks t
+       LEFT JOIN task_comment_reads r ON r.task_id = t.id AND r.user_id = $2
+       LEFT JOIN task_comments c ON c.task_id = t.id
+       WHERE t.org_id = $1
+         AND (
+           t.assignee_id = $2
+           OR t.created_by = $2
+           OR EXISTS (SELECT 1 FROM task_comments mc WHERE mc.task_id = t.id AND $2 = ANY(mc.mentions))
+         )
+       GROUP BY t.id, t.title
+       HAVING COUNT(c.id) FILTER (
+                WHERE c.author_id IS DISTINCT FROM $2
+                  AND c.created_at > COALESCE(r.last_read_at, '-infinity'::timestamptz)
+              ) > 0`,
+      [req.user.org_id, req.user.id]
+    );
+    const total = rows.reduce((sum, r) => sum + r.unread_count, 0);
+    res.json({ total, tasks: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id/comments', async (req, res, next) => {
   try {
     const { rows } = await query(
@@ -163,6 +212,13 @@ router.get('/:id/comments', async (req, res, next) => {
        WHERE tc.task_id = $1 AND tc.org_id = $2
        ORDER BY tc.created_at ASC`,
       [req.params.id, req.user.org_id]
+    );
+    // Opening a task's thread marks it read for unread-badge purposes.
+    await query(
+      `INSERT INTO task_comment_reads (task_id, user_id, last_read_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (task_id, user_id) DO UPDATE SET last_read_at = now()`,
+      [req.params.id, req.user.id]
     );
     res.json({ comments: rows });
   } catch (err) {
@@ -175,14 +231,23 @@ router.post('/:id/comments', async (req, res, next) => {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
     const { body } = req.body || {};
     if (!body || !body.trim()) return res.status(400).json({ error: 'body required' });
+    const trimmed = body.trim();
+    const mentions = await resolveMentions(trimmed, req.user.org_id);
     const { rows } = await query(
-      `INSERT INTO task_comments (task_id, org_id, author_id, body)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [req.params.id, req.user.org_id, req.user.id, body.trim()]
+      `INSERT INTO task_comments (task_id, org_id, author_id, body, mentions)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.params.id, req.user.org_id, req.user.id, trimmed, mentions]
     );
     const author = await query('SELECT COALESCE(name, email) AS author_name FROM users WHERE id = $1', [
       req.user.id,
     ]);
+    // Posting counts as having read the thread up to this point.
+    await query(
+      `INSERT INTO task_comment_reads (task_id, user_id, last_read_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (task_id, user_id) DO UPDATE SET last_read_at = now()`,
+      [req.params.id, req.user.id]
+    );
     res.status(201).json({ comment: { ...rows[0], author_name: author.rows[0]?.author_name || null } });
   } catch (err) {
     next(err);

@@ -89,6 +89,26 @@ export default function AppLayout({ user, onLogout }) {
     setMobileNavOpen(false);
   }, [location.pathname]);
 
+  // Unread task-comment badge, polled so replies show up without a manual refresh.
+  const [unreadCount, setUnreadCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    function poll() {
+      api.tasks
+        .unread()
+        .then((d) => {
+          if (!cancelled) setUnreadCount(d.total || 0);
+        })
+        .catch(() => {});
+    }
+    poll();
+    const t = setInterval(poll, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
+
   async function logout() {
     await api.logout();
     onLogout();
@@ -146,7 +166,14 @@ export default function AppLayout({ user, onLogout }) {
           {workspaceOpen &&
             WORKSPACE_NAV.map((item) => (
               <NavLink key={item.to} to={item.to} className={({ isActive }) => linkClass(isActive)}>
-                {item.label}
+                <span className="flex items-center justify-between">
+                  {item.label}
+                  {item.to === '/tasks' && unreadCount > 0 && (
+                    <span className="badge bg-primary text-white text-[10px] px-1.5 py-0 leading-4 min-w-[1.25rem] text-center">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </span>
               </NavLink>
             ))}
 
