@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
 
@@ -12,10 +13,9 @@ const EMAIL_FOLDERS = [
   { to: '/email/all', label: 'All mail' },
 ];
 
-const primaryNav = [
-  { to: '/clients', label: 'Clients' },
+const WORKSPACE_NAV = [
   { to: '/projects', label: 'Projects' },
-  { to: '/documents', label: 'Shared docs' },
+  { to: '/documents', label: 'Documents' },
   { to: '/tasks', label: 'Tasks' },
 ];
 
@@ -25,9 +25,62 @@ function linkClass(isActive) {
   }`;
 }
 
+function useCollapsed(key, defaultOpen) {
+  const [open, setOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem(key);
+      if (v === null) return defaultOpen;
+      return v === '1';
+    } catch {
+      return defaultOpen;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, open ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [key, open]);
+  return [open, setOpen];
+}
+
+function SectionHeader({ title, open, onToggle, hint }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="mt-4 mb-1 w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-slate-50 text-left"
+      aria-expanded={open}
+    >
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{title}</span>
+      <span className="flex items-center gap-2">
+        {hint && !open && <span className="text-[10px] text-primary font-medium normal-case">{hint}</span>}
+        <span className={`text-muted text-xs transition-transform ${open ? 'rotate-90' : ''}`}>›</span>
+      </span>
+    </button>
+  );
+}
+
 export default function AppLayout({ user, onLogout }) {
   const location = useLocation();
   const emailActive = location.pathname.startsWith('/email');
+  const workspaceActive =
+    location.pathname.startsWith('/projects') ||
+    location.pathname.startsWith('/documents') ||
+    location.pathname.startsWith('/tasks');
+
+  // Default: email collapsed (parked), workspace open when on those routes
+  const [emailOpen, setEmailOpen] = useCollapsed('mti_nav_email_open', false);
+  const [workspaceOpen, setWorkspaceOpen] = useCollapsed('mti_nav_workspace_open', true);
+
+  useEffect(() => {
+    if (emailActive) setEmailOpen(true);
+  }, [emailActive, setEmailOpen]);
+
+  useEffect(() => {
+    if (workspaceActive) setWorkspaceOpen(true);
+  }, [workspaceActive, setWorkspaceOpen]);
 
   async function logout() {
     await api.logout();
@@ -37,45 +90,46 @@ export default function AppLayout({ user, onLogout }) {
   return (
     <div className="min-h-screen flex">
       <aside className="w-[260px] shrink-0 border-r border-line bg-white/80 backdrop-blur px-4 py-5 flex flex-col">
-        <div className="mb-8 px-2">
+        <div className="mb-6 px-2">
           <div className="font-display text-2xl font-semibold tracking-tight text-ink">MTI</div>
-          <div className="text-xs text-muted mt-0.5">CRM · Email · Agents</div>
+          <div className="text-xs text-muted mt-0.5">CRM · Workspace · Agents</div>
         </div>
 
-        <nav className="flex flex-col gap-1 flex-1 overflow-y-auto">
+        <nav className="flex flex-col gap-0.5 flex-1 overflow-y-auto">
           <NavLink to="/clients" className={({ isActive }) => linkClass(isActive)}>
             Clients
           </NavLink>
 
-          <div className="mt-3 mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
-            Email
-          </div>
-          {EMAIL_FOLDERS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `rounded-lg px-3 py-1.5 text-sm transition block ${
-                  isActive ? 'bg-blue-50 text-primary font-medium' : 'text-muted hover:bg-slate-50 hover:text-ink'
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-          {!emailActive && (
-            <NavLink to="/email/inbox" className="px-3 py-1 text-xs text-primary hover:underline">
-              Open mail
-            </NavLink>
-          )}
-
-          <div className="mt-4 mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
-            Workspace
-          </div>
-          {primaryNav
-            .filter((n) => n.to !== '/clients')
-            .map((item) => (
+          <SectionHeader
+            title="Workspace"
+            open={workspaceOpen}
+            onToggle={() => setWorkspaceOpen((v) => !v)}
+            hint={workspaceActive ? 'active' : null}
+          />
+          {workspaceOpen &&
+            WORKSPACE_NAV.map((item) => (
               <NavLink key={item.to} to={item.to} className={({ isActive }) => linkClass(isActive)}>
+                {item.label}
+              </NavLink>
+            ))}
+
+          <SectionHeader
+            title="Email"
+            open={emailOpen}
+            onToggle={() => setEmailOpen((v) => !v)}
+            hint={emailActive ? 'active' : 'paused'}
+          />
+          {emailOpen &&
+            EMAIL_FOLDERS.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `rounded-lg px-3 py-1.5 text-sm transition block ${
+                    isActive ? 'bg-blue-50 text-primary font-medium' : 'text-muted hover:bg-slate-50 hover:text-ink'
+                  }`
+                }
+              >
                 {item.label}
               </NavLink>
             ))}
@@ -103,8 +157,8 @@ export default function AppLayout({ user, onLogout }) {
       <div className="flex-1 min-w-0">
         {!emailActive && (
           <header className="h-14 border-b border-line bg-white/70 backdrop-blur flex items-center justify-between px-6">
-            <div className="text-sm text-muted">Shared org workspace</div>
-            <div className="badge bg-blue-50 text-primary">Railway Postgres</div>
+            <div className="text-sm text-muted">Projects · Documents · Tasks</div>
+            <div className="badge bg-blue-50 text-primary">Linked workspace</div>
           </header>
         )}
         <main className={emailActive ? '' : 'p-6'}>

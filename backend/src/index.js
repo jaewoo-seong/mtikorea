@@ -17,6 +17,7 @@ const projectsRoutes = require('./routes/projects');
 const documentsRoutes = require('./routes/documents');
 const tasksRoutes = require('./routes/tasks');
 const adminRoutes = require('./routes/admin');
+const usersRoutes = require('./routes/users');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -81,6 +82,7 @@ app.use('/api/projects', projectsRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/tasks', tasksRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/users', usersRoutes);
 
 app.get('/api/bootstrap', requireAuth, async (req, res) => {
   res.json({

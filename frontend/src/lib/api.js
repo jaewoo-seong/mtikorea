@@ -86,6 +86,11 @@ export const api = {
     start: (id) => request(`/api/projects/${id}/start`, { method: 'POST', body: '{}' }),
     stop: (id) => request(`/api/projects/${id}/stop`, { method: 'POST', body: '{}' }),
     complete: (id) => request(`/api/projects/${id}/complete`, { method: 'POST', body: '{}' }),
+    sendMessage: (id, content) =>
+      request(`/api/projects/${id}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      }),
     upload: (id, files) => {
       const fd = new FormData();
       [...files].forEach((f) => fd.append('files', f));
@@ -95,19 +100,34 @@ export const api = {
 
   documents: {
     list: (params = {}) => {
-      const q = new URLSearchParams(params).toString();
+      const q = new URLSearchParams(
+        Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+      ).toString();
       return request(`/api/documents${q ? `?${q}` : ''}`);
     },
     upload: (file, meta = {}) => {
       const fd = new FormData();
       fd.append('file', file);
-      Object.entries(meta).forEach(([k, v]) => v != null && fd.append(k, v));
+      Object.entries(meta).forEach(([k, v]) => v != null && v !== '' && fd.append(k, v));
       return request('/api/documents', { method: 'POST', body: fd });
     },
+    update: (id, body) =>
+      request(`/api/documents/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    approve: (id) => request(`/api/documents/${id}/approve`, { method: 'POST', body: '{}' }),
+    reject: (id) => request(`/api/documents/${id}/reject`, { method: 'POST', body: '{}' }),
+  },
+
+  users: {
+    list: () => request('/api/users'),
   },
 
   tasks: {
-    list: () => request('/api/tasks'),
+    list: (params = {}) => {
+      const q = new URLSearchParams(
+        Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+      ).toString();
+      return request(`/api/tasks${q ? `?${q}` : ''}`);
+    },
     create: (body) => request('/api/tasks', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) =>
       request(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),

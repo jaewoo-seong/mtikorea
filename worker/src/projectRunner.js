@@ -86,6 +86,19 @@ async function runProjectStep(pool, project) {
       [p.id, tokens, metrics.progressPct, step]
     );
 
+    // Chat-style assistant response
+    await client.query(
+      `INSERT INTO project_messages (project_id, org_id, role, content, error_code)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [
+        p.id,
+        p.org_id,
+        action.includes('error') || action.includes('exception') ? 'error' : 'assistant',
+        detail || summary || `(step ${step})`,
+        action.includes('error') || action.includes('exception') ? action : null,
+      ]
+    );
+
     if (summary) {
       await client.query(
         `INSERT INTO agent_task_results (project_id, category, title, summary, confidence_score)
@@ -93,25 +106,39 @@ async function runProjectStep(pool, project) {
         [p.id, `Step ${step}`, summary]
       );
 
-      if (step % 3 === 0) {
+      // Stage document in hidden temp until user approves → shared docs
+      if (step % 2 === 0) {
+        const title = `Agent output · ${p.title} · step ${step}`;
         const saved = saveBuffer(
-          `projects/${p.id}`,
-          `report-step-${step}.txt`,
+          `projects/${p.id}/staged`,
+          `agent-output-step-${step}.txt`,
           Buffer.from(summary, 'utf8')
         );
-        await client.query(
+        const doc = await client.query(
           `INSERT INTO shared_documents (
-             org_id, client_id, project_id, title, description, filename, mime_type, size_bytes, storage_path, uploaded_by
-           ) VALUES ($1,$2,$3,$4,$5,$6,'text/plain',$7,$8,NULL)`,
+             org_id, client_id, project_id, title, description, filename, mime_type, size_bytes,
+             storage_path, uploaded_by, visibility, source
+           ) VALUES ($1,$2,$3,$4,$5,$6,'text/plain',$7,$8,NULL,'staged','agent')
+           RETURNING id`,
           [
             p.org_id,
             p.client_id,
             p.id,
-            `Worker report · step ${step}`,
+            title,
             summary.slice(0, 500),
-            `report-step-${step}.txt`,
+            `agent-output-step-${step}.txt`,
             saved.size,
             saved.storagePath,
+          ]
+        );
+        await client.query(
+          `INSERT INTO project_messages (project_id, org_id, role, content, document_id)
+           VALUES ($1,$2,'assistant',$3,$4)`,
+          [
+            p.id,
+            p.org_id,
+            `Staged document ready for approval: **${title}**`,
+            doc.rows[0].id,
           ]
         );
       }

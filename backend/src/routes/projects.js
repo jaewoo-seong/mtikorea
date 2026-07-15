@@ -54,8 +54,20 @@ router.get('/:id', async (req, res, next) => {
       [req.params.id]
     );
     const docs = await query(
-      `SELECT id, title, filename, mime_type, size_bytes, description, created_at
-       FROM shared_documents WHERE project_id = $1 ORDER BY created_at DESC`,
+      `SELECT id, title, filename, mime_type, size_bytes, description, created_at, visibility, source, approved_at
+       FROM shared_documents WHERE project_id = $1 AND visibility = 'shared' ORDER BY created_at DESC`,
+      [req.params.id]
+    );
+    const staged = await query(
+      `SELECT id, title, filename, mime_type, size_bytes, description, created_at, visibility, source
+       FROM shared_documents WHERE project_id = $1 AND visibility = 'staged' ORDER BY created_at DESC`,
+      [req.params.id]
+    );
+    const messages = await query(
+      `SELECT m.*, d.title AS document_title
+       FROM project_messages m
+       LEFT JOIN shared_documents d ON d.id = m.document_id
+       WHERE m.project_id = $1 ORDER BY m.created_at ASC`,
       [req.params.id]
     );
     const logs = await query(
@@ -66,10 +78,21 @@ router.get('/:id', async (req, res, next) => {
       'SELECT * FROM agent_task_results WHERE project_id = $1 ORDER BY created_at DESC',
       [req.params.id]
     );
+    const tasks = await query(
+      `SELECT t.*, u.name AS assignee_name
+       FROM shared_tasks t
+       LEFT JOIN users u ON u.id = t.assignee_id
+       WHERE t.project_id = $1 AND t.org_id = $2
+       ORDER BY t.updated_at DESC`,
+      [req.params.id, req.user.org_id]
+    );
     res.json({
       project,
       files: files.rows,
       documents: docs.rows,
+      stagedDocuments: staged.rows,
+      messages: messages.rows,
+      tasks: tasks.rows,
       logs: logs.rows.reverse(),
       results: results.rows,
     });
@@ -203,11 +226,12 @@ router.post('/:id/files', upload.array('files', 20), async (req, res, next) => {
           req.user.id,
         ]
       );
-      // Also index in shared documents for CRM visibility
+      // User context uploads stay on project but go to shared when not agent-generated
       await query(
         `INSERT INTO shared_documents (
-           org_id, client_id, project_id, title, description, filename, mime_type, size_bytes, storage_path, uploaded_by
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           org_id, client_id, project_id, title, description, filename, mime_type, size_bytes,
+           storage_path, uploaded_by, visibility, source, approved_at, approved_by
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'shared','upload',now(),$10)`,
         [
           req.user.org_id,
           project.rows[0].client_id,
@@ -276,6 +300,42 @@ router.post('/:id/stop', async (req, res, next) => {
       [req.params.id]
     );
     res.json({ project: withProgress(rows[0]) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/messages', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const content = (req.body?.content || '').trim();
+    if (!content) return res.status(400).json({ error: 'content required' });
+    const project = await query(
+      'SELECT * FROM projects WHERE id = $1 AND org_id = $2',
+      [req.params.id, req.user.org_id]
+    );
+    if (!project.rows[0]) return res.status(404).json({ error: 'Not found' });
+
+    const userMsg = await query(
+      `INSERT INTO project_messages (project_id, org_id, role, content)
+       VALUES ($1,$2,'user',$3) RETURNING *`,
+      [req.params.id, req.user.org_id, content]
+    );
+
+    // Lightweight assistant ack — full agent work continues via Start/worker
+    const assistant = await query(
+      `INSERT INTO project_messages (project_id, org_id, role, content)
+       VALUES ($1,$2,'assistant',$3) RETURNING *`,
+      [
+        req.params.id,
+        req.user.org_id,
+        project.rows[0].status === 'running'
+          ? `Noted. Worker is running in the background and will stage document outputs for approval.\n\nYou said: ${content}`
+          : `Noted. Start the worker to process this project in the background. Outputs will appear under Pending approval before Shared docs.\n\nYou said: ${content}`,
+      ]
+    );
+
+    res.status(201).json({ messages: [userMsg.rows[0], assistant.rows[0]] });
   } catch (err) {
     next(err);
   }

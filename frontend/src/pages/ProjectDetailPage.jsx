@@ -27,6 +27,8 @@ export default function ProjectDetailPage() {
   const [data, setData] = useState(null);
   const [msg, setMsg] = useState('');
   const [schedule, setSchedule] = useState({ allottedHours: '', dueAt: '' });
+  const [taskTitle, setTaskTitle] = useState('');
+  const [chatInput, setChatInput] = useState('');
 
   async function load() {
     const d = await api.projects.get(id);
@@ -74,9 +76,52 @@ export default function ProjectDetailPage() {
     await load();
   }
 
+  async function addTask(e) {
+    e.preventDefault();
+    if (!taskTitle.trim()) return;
+    await api.tasks.create({
+      title: taskTitle.trim(),
+      projectId: id,
+      clientId: data.project.client_id || null,
+    });
+    setTaskTitle('');
+    setMsg('Task linked to this project');
+    await load();
+  }
+
+  async function sendChat(e) {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    await api.projects.sendMessage(id, chatInput.trim());
+    setChatInput('');
+    await load();
+  }
+
+  async function approveDoc(docId) {
+    await api.documents.approve(docId);
+    setMsg('Document approved → Shared docs');
+    await load();
+  }
+
+  async function rejectDoc(docId) {
+    await api.documents.reject(docId);
+    setMsg('Staged document discarded');
+    await load();
+  }
+
   if (!data) return <div className="text-sm text-muted">{msg || 'Loading…'}</div>;
-  const { project, files, documents = [], logs, results } = data;
+  const {
+    project,
+    files,
+    documents = [],
+    stagedDocuments = [],
+    messages = [],
+    tasks = [],
+    logs,
+    results,
+  } = data;
   const live = project.status === 'running';
+  const errors = messages.filter((m) => m.role === 'error');
 
   return (
     <div className="space-y-6">
@@ -131,10 +176,24 @@ export default function ProjectDetailPage() {
           </div>
           <div className="rounded-xl bg-slate-50 p-3">
             <div className="text-xs text-muted">Outputs</div>
-            <div className="mt-1 font-semibold">{(files?.length || 0) + (documents?.length || 0)} docs</div>
+            <div className="mt-1 font-semibold">
+              {documents.length} shared · {stagedDocuments.length} pending
+            </div>
           </div>
         </div>
       </div>
+
+      {!!errors.length && (
+        <div className="card p-4 border-danger/30 bg-red-50 text-sm space-y-2">
+          <div className="font-semibold text-danger">Agent / API errors</div>
+          {errors.slice(-5).map((m) => (
+            <div key={m.id} className="text-danger/90 text-xs whitespace-pre-wrap border-t border-red-100 pt-2">
+              {m.error_code && <span className="font-mono mr-2">[{m.error_code}]</span>}
+              {m.content}
+            </div>
+          ))}
+        </div>
+      )}
 
       <form onSubmit={saveSchedule} className="card p-5 grid md:grid-cols-3 gap-3 items-end">
         <label className="text-sm">
@@ -156,82 +215,140 @@ export default function ProjectDetailPage() {
 
       {msg && <p className="text-sm text-muted">{msg}</p>}
 
+      <div className="flex flex-wrap gap-2 text-sm">
+        <Link className="btn-secondary" to={`/documents?projectId=${id}`}>All documents →</Link>
+        <Link className="btn-secondary" to={`/tasks?projectId=${id}`}>All tasks →</Link>
+      </div>
+
+      <div className="card p-5 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="font-semibold">Human tasks on this project</h2>
+          <form onSubmit={addTask} className="flex gap-2 flex-1 min-w-[240px] max-w-md">
+            <input className="input" placeholder="Add follow-up task…" value={taskTitle}
+              onChange={(e) => setTaskTitle(e.target.value)} />
+            <button className="btn-primary shrink-0" type="submit">Add</button>
+          </form>
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          {tasks.map((t) => (
+            <div key={t.id} className="rounded-xl border border-line p-3 bg-slate-50/80">
+              <div className="flex justify-between gap-2">
+                <div className="font-medium text-sm">{t.title}</div>
+                <span className="badge bg-white capitalize text-xs">{t.status}</span>
+              </div>
+              <div className="text-xs text-muted mt-1">{t.assignee_name || 'Unassigned'}</div>
+            </div>
+          ))}
+          {!tasks.length && <p className="text-sm text-muted md:col-span-2">No human tasks yet — agent work is separate</p>}
+        </div>
+      </div>
+
       <div className="grid lg:grid-cols-2 gap-4">
-        <div className="card p-5">
+        <div className="card p-5 flex flex-col min-h-[420px]">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">Project files</h2>
-            <input type="file" multiple className="text-xs" onChange={onUpload} disabled={live} />
+            <h2 className="font-semibold">Agent chat / responses</h2>
+            {live && <span className="badge bg-blue-100 text-primary animate-pulse">live</span>}
           </div>
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {files.map((f) => (
-              <a
-                key={f.id}
-                href={`/api/projects/${id}/files/${f.id}/download`}
-                className="flex justify-between gap-3 rounded-lg border border-line px-3 py-2 text-sm hover:bg-slate-50"
+          <div className="flex-1 space-y-3 overflow-y-auto max-h-[360px] mb-3">
+            {messages.map((m) => (
+              <div
+                key={m.id}
+                className={`rounded-xl px-3 py-2 text-sm whitespace-pre-wrap ${
+                  m.role === 'user'
+                    ? 'bg-blue-50 text-ink ml-8'
+                    : m.role === 'error'
+                      ? 'bg-red-50 text-danger'
+                      : 'bg-slate-50 text-ink mr-8'
+                }`}
               >
-                <span className="truncate">{f.filename}</span>
-                <span className="text-xs text-muted shrink-0">{Math.round((f.size_bytes || 0) / 1024)} KB</span>
-              </a>
+                <div className="text-[10px] uppercase tracking-wide text-muted mb-1">{m.role}</div>
+                {m.content}
+                {m.document_id && (
+                  <div className="text-xs text-primary mt-1">Doc: {m.document_title || m.document_id}</div>
+                )}
+              </div>
             ))}
-            {!files.length && <p className="text-sm text-muted">No uploads yet</p>}
+            {!messages.length && (
+              <p className="text-sm text-muted">Chat with the agent here. Background worker also posts responses + staged docs.</p>
+            )}
           </div>
+          <form onSubmit={sendChat} className="flex gap-2 border-t border-line pt-3">
+            <input className="input" placeholder="Ask the agent / add instructions…" value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)} />
+            <button className="btn-primary shrink-0" type="submit">Send</button>
+          </form>
         </div>
 
-        <div className="card p-5">
-          <h2 className="font-semibold mb-3">Generated / shared documents</h2>
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {documents.map((d) => (
-              <a
-                key={d.id}
-                href={`/api/documents/${d.id}/download`}
-                className="block rounded-lg border border-line px-3 py-2 hover:bg-slate-50"
-              >
-                <div className="text-sm font-medium truncate">{d.title}</div>
-                <div className="text-xs text-muted truncate mt-0.5">{d.description || d.filename}</div>
-              </a>
-            ))}
-            {!documents.length && <p className="text-sm text-muted">Worker reports appear here as the job runs</p>}
+        <div className="space-y-4">
+          <div className="card p-5">
+            <h2 className="font-semibold mb-1">Pending approval (hidden staging)</h2>
+            <p className="text-xs text-muted mb-3">Agent outputs stay here until you approve → Shared docs.</p>
+            <div className="space-y-2 max-h-56 overflow-y-auto">
+              {stagedDocuments.map((d) => (
+                <div key={d.id} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
+                  <div className="text-sm font-medium">{d.title}</div>
+                  <div className="text-xs text-muted mt-0.5 line-clamp-2">{d.description}</div>
+                  <div className="flex gap-2 mt-2">
+                    <button type="button" className="btn-primary text-xs py-1" onClick={() => approveDoc(d.id)}>Approve</button>
+                    <button type="button" className="btn-ghost text-xs py-1 text-danger" onClick={() => rejectDoc(d.id)}>Reject</button>
+                    <a className="btn-ghost text-xs py-1" href={`/api/documents/${d.id}/download`}>Preview</a>
+                  </div>
+                </div>
+              ))}
+              {!stagedDocuments.length && <p className="text-sm text-muted">No staged outputs yet</p>}
+            </div>
+          </div>
+
+          <div className="card p-5">
+            <h2 className="font-semibold mb-3">Approved on this project</h2>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+              {documents.map((d) => (
+                <a key={d.id} href={`/api/documents/${d.id}/download`} className="block rounded-lg border border-line px-3 py-2 hover:bg-slate-50 text-sm">
+                  <div className="font-medium truncate">{d.title}</div>
+                  <div className="text-xs text-muted">Shared doc ID = title</div>
+                </a>
+              ))}
+              {!documents.length && <p className="text-sm text-muted">Approve staged docs to publish here + Shared docs</p>}
+            </div>
           </div>
         </div>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="card p-5">
-          <h2 className="font-semibold mb-3">Reports & findings</h2>
-          <div className="space-y-3 max-h-[420px] overflow-y-auto">
-            {results.map((r) => (
-              <div key={r.id} className="rounded-xl border border-line p-4 bg-gradient-to-br from-white to-slate-50">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-medium text-sm">{r.title}</div>
-                  <span className="badge bg-blue-50 text-primary">{r.category}</span>
-                </div>
-                <p className="text-sm text-muted mt-2 whitespace-pre-wrap">{r.summary}</p>
-                <div className="text-[11px] text-muted mt-2">{new Date(r.created_at).toLocaleString()}</div>
-              </div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold">Context uploads</h2>
+            <input type="file" multiple className="text-xs" onChange={onUpload} disabled={live} />
+          </div>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {files.map((f) => (
+              <a key={f.id} href={`/api/projects/${id}/files/${f.id}/download`}
+                className="flex justify-between gap-3 rounded-lg border border-line px-3 py-2 text-sm hover:bg-slate-50">
+                <span className="truncate">{f.filename}</span>
+                <span className="text-xs text-muted">{Math.round((f.size_bytes || 0) / 1024)} KB</span>
+              </a>
             ))}
-            {!results.length && <p className="text-sm text-muted">No findings yet — Start the worker</p>}
+            {!files.length && <p className="text-sm text-muted">Upload briefing files before Start</p>}
           </div>
         </div>
 
         <div className="card p-5">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">Live work log</h2>
+            <h2 className="font-semibold">Work log</h2>
             {live && <span className="badge bg-blue-100 text-primary animate-pulse">streaming</span>}
           </div>
-          <div className="space-y-3 max-h-[420px] overflow-y-auto">
-            {[...logs].reverse().map((l) => (
-              <div key={l.id} className="relative pl-4 border-l-2 border-primary/30">
-                <div className="text-[11px] text-muted font-mono">
-                  #{l.step_number} · {l.phase} · {l.action}
-                  {l.tokens_used ? ` · ${l.tokens_used} tok` : ''}
-                  {l.duration_ms != null ? ` · ${l.duration_ms}ms` : ''}
-                </div>
-                <div className="mt-1 text-sm whitespace-pre-wrap">{l.detail}</div>
-                <div className="text-[11px] text-muted mt-1">{new Date(l.created_at).toLocaleString()}</div>
+          <div className="space-y-3 max-h-48 overflow-y-auto">
+            {[...logs].reverse().slice(0, 40).map((l) => (
+              <div key={l.id} className="pl-3 border-l-2 border-primary/30">
+                <div className="text-[11px] text-muted font-mono">#{l.step_number} · {l.action}</div>
+                <div className="text-sm whitespace-pre-wrap line-clamp-4">{l.detail}</div>
               </div>
             ))}
-            {!logs.length && <p className="text-sm text-muted">No agent activity until Start</p>}
+            {!logs.length && <p className="text-sm text-muted">No steps until Start</p>}
           </div>
+          {!!results.length && (
+            <div className="mt-3 pt-3 border-t border-line text-xs text-muted">{results.length} finding snapshots</div>
+          )}
         </div>
       </div>
     </div>

@@ -15,22 +15,29 @@ const FIELDS = [
   'status',
   'notes',
   'description',
+  'profile_markdown',
 ];
 
 router.get('/', async (req, res, next) => {
   try {
     const { status, q } = req.query;
     const params = [req.user.org_id];
-    let sql = `SELECT * FROM clients WHERE org_id = $1`;
+    let sql = `
+      SELECT c.*,
+        (SELECT COUNT(*)::int FROM shared_documents d WHERE d.client_id = c.id AND d.visibility = 'shared') AS document_count,
+        (SELECT COUNT(*)::int FROM projects p WHERE p.client_id = c.id) AS project_count,
+        (SELECT COUNT(*)::int FROM shared_tasks t WHERE t.client_id = c.id) AS task_count
+      FROM clients c
+      WHERE c.org_id = $1`;
     if (status) {
       params.push(status);
-      sql += ` AND status = $${params.length}`;
+      sql += ` AND c.status = $${params.length}`;
     }
     if (q) {
       params.push(`%${q}%`);
-      sql += ` AND (name ILIKE $${params.length} OR korean_name ILIKE $${params.length} OR email ILIKE $${params.length})`;
+      sql += ` AND (c.name ILIKE $${params.length} OR c.korean_name ILIKE $${params.length} OR c.email ILIKE $${params.length} OR c.industry ILIKE $${params.length})`;
     }
-    sql += ' ORDER BY updated_at DESC';
+    sql += ' ORDER BY c.updated_at DESC';
     const { rows } = await query(sql, params);
     res.json({ clients: rows });
   } catch (err) {
@@ -58,7 +65,15 @@ router.get('/:id', async (req, res, next) => {
       [req.params.id]
     );
     const docs = await query(
-      'SELECT id, title, filename, mime_type, size_bytes, created_at FROM shared_documents WHERE client_id = $1 ORDER BY created_at DESC',
+      `SELECT id, title, filename, mime_type, size_bytes, created_at, project_id, visibility, source
+       FROM shared_documents
+       WHERE client_id = $1 AND visibility = 'shared'
+       ORDER BY created_at DESC`,
+      [req.params.id]
+    );
+    const projects = await query(
+      `SELECT id, title, status, progress_pct, due_at, allotted_hours, updated_at
+       FROM projects WHERE client_id = $1 ORDER BY updated_at DESC`,
       [req.params.id]
     );
     const emails = await query(
@@ -66,7 +81,10 @@ router.get('/:id', async (req, res, next) => {
       [req.params.id]
     );
     const tasks = await query(
-      'SELECT * FROM shared_tasks WHERE client_id = $1 ORDER BY updated_at DESC',
+      `SELECT t.*, d.title AS document_title
+       FROM shared_tasks t
+       LEFT JOIN shared_documents d ON d.id = t.document_id
+       WHERE t.client_id = $1 ORDER BY t.updated_at DESC`,
       [req.params.id]
     );
     res.json({
@@ -74,6 +92,7 @@ router.get('/:id', async (req, res, next) => {
       edits: edits.rows,
       notes: notes.rows,
       documents: docs.rows,
+      projects: projects.rows,
       emails: emails.rows,
       tasks: tasks.rows,
     });
