@@ -184,9 +184,9 @@ export default function AdminPage({ user }) {
       <div>
         <h2 className="font-display text-2xl font-semibold">Model & API keys</h2>
         <p className="text-sm text-muted mt-1">
-          Sub-agent work rotates across every healthy key below. Keys are tested when added and
-          re-checked automatically in the background — one going bad just drops out of rotation,
-          it doesn't stop anything.
+          <strong>Default:</strong> Railway/env <code className="text-xs">OPENROUTER_API_KEY</code> runs
+          the main Haiku orchestrator (and env free-model fallback for subs).
+          Keys below are <strong>extra sub-agent options</strong> — tested when you add them and again on-demand before sub-agent use (skipped for 1h after a healthy check or successful use). Unhealthy keys are skipped; env OpenRouter fallback rechecks every ~10 minutes while subs are active.
         </p>
       </div>
 

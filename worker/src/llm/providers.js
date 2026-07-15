@@ -105,4 +105,18 @@ async function callProvider({ provider, apiKey, model, messages, maxTokens = 900
   throw lastErr;
 }
 
-module.exports = { callProvider, PROVIDERS };
+function isAuthFailure(err) {
+  if (!err) return false;
+  if (err.code === 'missing_key') return true;
+  if (err.status === 401 || err.status === 403) return true;
+  const text = String(err.body || err.message || '').toLowerCase();
+  return (
+    text.includes('invalid api key') ||
+    text.includes('incorrect api key') ||
+    text.includes('unauthorized') ||
+    text.includes('authentication') ||
+    text.includes('invalid authentication')
+  );
+}
+
+module.exports = { callProvider, PROVIDERS, isAuthFailure };

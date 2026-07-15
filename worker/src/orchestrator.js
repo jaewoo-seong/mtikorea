@@ -1,5 +1,6 @@
-const { chat, getMainModel, getSubModels, hasApiKey } = require('./llm/openrouter');
-const { callProvider } = require('./llm/providers');
+const { chat, getMainModel, hasApiKey } = require('./llm/openrouter');
+const { callProvider, isAuthFailure } = require('./llm/providers');
+const { buildSubAgentCandidates, ensureEnvOpenRouterHealthy } = require('./lib/keyPool');
 const { parseAgentJson, normalizePlan } = require('./parseAgentJson');
 const { globalSubAgentSemaphore } = require('./lib/semaphore');
 
@@ -13,31 +14,152 @@ function subConcurrency() {
   return Number.isFinite(n) && n > 0 ? Math.min(10, Math.floor(n)) : 10;
 }
 
-function pickSubModel(index) {
-  const models = getSubModels();
-  return models[index % models.length];
-}
-
-/**
- * Health-aware rotation: prefer the admin-managed pool of (provider, model,
- * apiKey) candidates from healthy llm_api_keys rows (already filtered to
- * exclude unhealthy/inactive keys by fetchHealthyKeyPool). If no keys are
- * configured yet, fall back to the static OPENROUTER_SUB_MODELS list on the
- * shared worker key — fully backward compatible with zero-config setups.
- */
-function pickSubAgentTarget(index, pool) {
-  if (Array.isArray(pool) && pool.length) {
-    const entry = pool[index % pool.length];
-    return { provider: entry.provider, model: entry.model, apiKey: entry.apiKey };
-  }
-  return { provider: 'openrouter', model: pickSubModel(index), apiKey: process.env.OPENROUTER_API_KEY };
-}
-
 function roleForIndex(index, preferred) {
   if (preferred && ROLES.includes(String(preferred).toLowerCase())) {
     return String(preferred).toLowerCase();
   }
   return ROLES[index % ROLES.length];
+}
+
+function displayModelForTarget(target) {
+  return target.provider === 'openrouter' ? target.model : `${target.provider}/${target.model}`;
+}
+
+/**
+ * Try admin pool entries then env OpenRouter fallbacks. Auth failures mark the
+ * key unhealthy and rotate; rate limits and transient errors also rotate without
+ * stopping the project — the main agent synthesizes partial/failed sub output.
+ */
+async function runSubTaskWithFallback({
+  task,
+  idx,
+  pool,
+  subAgentKeyOps,
+  project,
+  memoryBlock,
+  role,
+  onRetry,
+  onProgress,
+  onEvent,
+}) {
+  const candidates = buildSubAgentCandidates(pool, idx);
+  const errors = [];
+
+  for (const target of candidates) {
+    if (target.source === 'env') {
+      const envOk = await ensureEnvOpenRouterHealthy();
+      if (!envOk) {
+        errors.push(`env OpenRouter: ${process.env.OPENROUTER_API_KEY ? 'auth check failed' : 'no key'}`);
+        continue;
+      }
+    }
+
+    const displayModel = displayModelForTarget(target);
+    const t0 = Date.now();
+    await onProgress({
+      stage: 'sub_agents',
+      detail: `${role} → ${displayModel}${errors.length ? ' (fallback)' : ''}`,
+      mode: 'openrouter',
+      current_sub: { role, model: displayModel, index: idx + 1, of: task._of, fallback: errors.length > 0 },
+    });
+
+    try {
+      const res = await globalSubAgentSemaphore.run(() =>
+        callProvider({
+          provider: target.provider,
+          apiKey: target.apiKey,
+          model: target.model,
+          maxTokens: 900,
+          temperature: 0.5,
+          messages: [
+            {
+              role: 'system',
+              content: `You are a free ${role} sub-agent for an MTI project. Be concrete and useful. No JSON required — return markdown or plain text.`,
+            },
+            {
+              role: 'user',
+              content: [
+                `Project: ${project.title}`,
+                `Goal: ${project.goal || 'n/a'}`,
+                memoryBlock,
+                `Your role: ${role}`,
+                `Expect: ${task.expect || 'helpful output'}`,
+                `Task:\n${task.prompt}`,
+              ].join('\n'),
+            },
+          ],
+          onRetry,
+        })
+      );
+
+      if (target.keyId && subAgentKeyOps?.markUsed) {
+        await subAgentKeyOps.markUsed(target.keyId);
+      }
+
+      await onEvent({
+        stage: 'sub_agents',
+        action: 'ok',
+        status: 'ok',
+        summary: `${role} finished${errors.length ? ' (after fallback)' : ''}`,
+        detail: res.content,
+        model: displayModel,
+        role,
+        tokensUsed: res.tokens,
+        durationMs: Date.now() - t0,
+      });
+
+      return {
+        role,
+        model: displayModel,
+        ok: true,
+        content: res.content,
+        tokens: res.tokens,
+        fallbacksTried: errors.length,
+      };
+    } catch (err) {
+      const detail = err.body || err.message;
+      errors.push(`${displayModel}: ${err.message}`);
+
+      if (isAuthFailure(err) && target.keyId && subAgentKeyOps?.markUnhealthy) {
+        await subAgentKeyOps.markUnhealthy(target.keyId, err);
+      }
+
+      await onEvent({
+        stage: 'sub_agents',
+        action: isAuthFailure(err) ? 'auth_fail_rotate' : 'error_rotate',
+        status: 'error',
+        summary: `${role} failed on ${displayModel}, trying next`,
+        detail: err.message,
+        errorFull: detail,
+        model: displayModel,
+        role,
+        durationMs: Date.now() - t0,
+      });
+    }
+  }
+
+  const summary = errors.length
+    ? `All sub-agent targets failed (${errors.length} tried)`
+    : 'No sub-agent targets configured';
+
+  await onEvent({
+    stage: 'sub_agents',
+    action: 'exhausted',
+    status: 'error',
+    summary,
+    detail: errors.join('\n'),
+    role,
+  });
+
+  return {
+    role,
+    model: 'none',
+    ok: false,
+    content: summary,
+    tokens: 20,
+    exhausted: true,
+    errors,
+  };
 }
 
 const PLAN_SYSTEM = `You are the MAIN orchestrator for an MTI CRM project worker in a continuous improvement loop.
@@ -129,6 +251,7 @@ async function runOrchestratorCycle(project, context = {}) {
   const fileNames = context.fileNames || [];
   const recentLog = context.recentLog || [];
   const subAgentPool = context.subAgentPool || [];
+  const subAgentKeyOps = context.subAgentKeyOps || null;
   const checkpoint = project.checkpoint || {};
   const memory = checkpoint.memory || {};
   const onProgress = typeof context.onProgress === 'function' ? context.onProgress : async () => {};
@@ -299,105 +422,39 @@ async function runOrchestratorCycle(project, context = {}) {
     });
 
     subResults = await mapPool(subtasks, subConcurrency(), async (task, idx) => {
-      const { provider, model, apiKey } = pickSubAgentTarget(idx, subAgentPool);
-      const displayModel = provider === 'openrouter' ? model : `${provider}/${model}`;
       const role = roleForIndex(idx, task.role);
-      const t0 = Date.now();
-      await onProgress({
-        stage: 'sub_agents',
-        detail: `${role} → ${displayModel}`,
-        mode: 'openrouter',
-        current_sub: { role, model: displayModel, index: idx + 1, of: subtasks.length },
-      });
+      task._of = subtasks.length;
       await onEvent({
         stage: 'sub_agents',
         action: 'start',
         status: 'started',
         summary: `${role} started`,
-        model: displayModel,
         role,
         detail: task.prompt,
       });
-      try {
-        // Global gate: even if many projects each dispatch up to 10 sub-agents at
-        // once, only WORKER_GLOBAL_SUBAGENT_CONCURRENCY (default 20) actually run
-        // their LLM call at the same instant system-wide — the rest queue here.
-        const res = await globalSubAgentSemaphore.run(() =>
-          callProvider({
-            provider,
-            apiKey,
-            model,
-            maxTokens: 900,
-            temperature: 0.5,
-            messages: [
-              {
-                role: 'system',
-                content: `You are a free ${role} sub-agent for an MTI project. Be concrete and useful. No JSON required — return markdown or plain text.`,
-              },
-              {
-                role: 'user',
-                content: [
-                  `Project: ${project.title}`,
-                  `Goal: ${project.goal || 'n/a'}`,
-                  memoryBlock,
-                  `Your role: ${role}`,
-                  `Expect: ${task.expect || 'helpful output'}`,
-                  `Task:\n${task.prompt}`,
-                ].join('\n'),
-              },
-            ],
-            onRetry: retryHook('sub_agents'),
-          })
-        );
-        logs.push({
-          phase: 'sub_agent_call',
-          action: role,
-          detail: res.content.slice(0, 4000),
-          tokens: res.tokens,
-          subAgent: displayModel,
-        });
-        totalTokens += res.tokens;
-        await onEvent({
-          stage: 'sub_agents',
-          action: 'ok',
-          status: 'ok',
-          summary: `${role} finished`,
-          detail: res.content,
-          model: displayModel,
-          role,
-          tokensUsed: res.tokens,
-          durationMs: Date.now() - t0,
-        });
-        return { role, model: displayModel, ok: true, content: res.content, tokens: res.tokens };
-      } catch (err) {
-        if (err.rateLimited) rateLimited = true;
-        error = error || {
-          code: err.code || 'sub_agent_error',
-          message: err.message,
-          body: err.body,
-          stage: 'sub_agents',
-        };
-        logs.push({
-          phase: 'sub_agent_call',
-          action: `${role}_error`,
-          detail: err.message,
-          tokens: 20,
-          subAgent: displayModel,
-        });
-        totalTokens += 20;
-        await onEvent({
-          stage: 'sub_agents',
-          action: 'error',
-          status: 'error',
-          summary: `${role} failed: ${err.message}`,
-          detail: err.message,
-          errorFull: err.body || err.message,
-          model: displayModel,
-          role,
-          durationMs: Date.now() - t0,
-        });
-        return { role, model: displayModel, ok: false, content: err.message, tokens: 20 };
-      }
+
+      const result = await runSubTaskWithFallback({
+        task,
+        idx,
+        pool: subAgentPool,
+        subAgentKeyOps,
+        project,
+        memoryBlock,
+        role,
+        onRetry: retryHook('sub_agents'),
+        onProgress,
+        onEvent,
+      });
+
+      logs.push({
+        phase: 'sub_agent_call',
+        action: result.ok ? role : `${role}_error`,
+        detail: result.content.slice(0, 4000),
+        tokens: result.tokens,
+        subAgent: result.model,
+      });
+      totalTokens += result.tokens;
+      return result;
     });
   } else {
     await onEvent({
@@ -406,10 +463,6 @@ async function runOrchestratorCycle(project, context = {}) {
       status: 'skipped',
       summary: 'No subtasks from planner',
     });
-  }
-
-  if (rateLimited && error?.code === 'rate_limit') {
-    return failResult({ error, rateLimited, totalTokens, checkpoint, logs, plan });
   }
 
   const subOk = subResults.filter((r) => r.ok).length;
@@ -451,6 +504,9 @@ async function runOrchestratorCycle(project, context = {}) {
             contextBlock,
             `Plan summary: ${plan.summary}`,
             `Plan status: ${plan.status}`,
+            subFail === subResults.length && subResults.length
+              ? `WARNING: All ${subResults.length} sub-agent(s) failed after fallback rotation — synthesize from the plan and note what could not be delegated.`
+              : null,
             `Sub-agent results:\n${subDigest || '(no sub-agents ran)'}`,
           ].join('\n\n'),
         },

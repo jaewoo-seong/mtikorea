@@ -20,7 +20,6 @@ const adminRoutes = require('./routes/admin');
 const usersRoutes = require('./routes/users');
 const settingsRoutes = require('./routes/settings');
 const llmKeysRoutes = require('./routes/llmKeys');
-const { startPeriodicHealthCheck } = require('./lib/llmKeyHealthCheck');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -118,7 +117,6 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`MTI CRM API on :${PORT}`);
   });
-  startPeriodicHealthCheck();
 }
 
 module.exports = app;

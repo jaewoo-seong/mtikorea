@@ -28,9 +28,9 @@ Nothing is on a public Railway domain until you create the project and deploy.
 
 | Key | Why |
 |-----|-----|
-| `OPENROUTER_API_KEY` | **Worker** — Haiku main + free sub-agents after Project **Start** ([openrouter.ai/keys](https://openrouter.ai/keys)) |
+| `OPENROUTER_API_KEY` | **Default** Worker key — main Haiku orchestrator (+ free-sub fallback). Keep on Railway Worker (+ API for health). Extra keys go in **Admin → Model & API keys** for sub-agents only. |
 | `OPENROUTER_MAIN_MODEL` | Default `anthropic/claude-haiku-4.5` (paid via OpenRouter) |
-| `OPENROUTER_SUB_MODELS` | Comma list of free model slugs for sub-agents |
+| `OPENROUTER_SUB_MODELS` | Fallback free-model list when no healthy Admin keys |
 | `TAVILY_API_KEY` | Web research (optional, unused in v1) |
 
 ### Later (skip until needed)

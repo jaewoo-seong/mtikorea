@@ -6,7 +6,7 @@
 const { projectProgress } = require('../../backend/src/lib/projectProgress');
 const { saveBuffer } = require('../../backend/src/lib/storage');
 const { runOrchestratorCycle, runWrapUpCycle } = require('./orchestrator');
-const { fetchHealthyKeyPool } = require('./lib/keyPool');
+const { prepareSubAgentPool, markKeyUsed, markKeyUnhealthy } = require('./lib/keyPool');
 const { recordEvent, setStopReason } = require('./events');
 
 // Reasons that mean "time is up, finish gracefully" — get a wrap-up summary cycle
@@ -124,7 +124,7 @@ async function runProjectStep(pool, project) {
         detail: `Claim slice ${i + 1}/${maxIters}`,
       });
 
-      const subAgentPool = await fetchHealthyKeyPool(client, p.org_id);
+      const subAgentPool = await prepareSubAgentPool(client, p.org_id);
 
       const started = Date.now();
       const result = await runOrchestratorCycle(
@@ -133,6 +133,10 @@ async function runProjectStep(pool, project) {
           step: cycle,
           fileNames,
           subAgentPool,
+          subAgentKeyOps: {
+            markUsed: (keyId) => markKeyUsed(client, keyId),
+            markUnhealthy: (keyId, err) => markKeyUnhealthy(client, keyId, err),
+          },
           recentLog: recentRes.rows.map((r) => `${r.stage}:${r.action}:${r.detail || ''}`),
           onProgress: async (evt) => {
             await writeCheckpoint(client, p.id, {
@@ -212,8 +216,8 @@ async function runProjectStep(pool, project) {
         }
       }
 
-      // Rate limit → hard pause
-      if (result.rateLimited) {
+      // Rate limit on main orchestrator only — sub-agents rotate/fallback instead of pausing
+      if (result.rateLimited && result.error?.stage !== 'sub_agents') {
         const msg =
           result.error?.body ||
           result.error?.message ||
