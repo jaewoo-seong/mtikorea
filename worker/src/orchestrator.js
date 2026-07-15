@@ -1,4 +1,5 @@
 const { chat, getMainModel, getSubModels, hasApiKey } = require('./llm/openrouter');
+const { callProvider } = require('./llm/providers');
 const { parseAgentJson, normalizePlan } = require('./parseAgentJson');
 const { globalSubAgentSemaphore } = require('./lib/semaphore');
 
@@ -15,6 +16,21 @@ function subConcurrency() {
 function pickSubModel(index) {
   const models = getSubModels();
   return models[index % models.length];
+}
+
+/**
+ * Health-aware rotation: prefer the admin-managed pool of (provider, model,
+ * apiKey) candidates from healthy llm_api_keys rows (already filtered to
+ * exclude unhealthy/inactive keys by fetchHealthyKeyPool). If no keys are
+ * configured yet, fall back to the static OPENROUTER_SUB_MODELS list on the
+ * shared worker key — fully backward compatible with zero-config setups.
+ */
+function pickSubAgentTarget(index, pool) {
+  if (Array.isArray(pool) && pool.length) {
+    const entry = pool[index % pool.length];
+    return { provider: entry.provider, model: entry.model, apiKey: entry.apiKey };
+  }
+  return { provider: 'openrouter', model: pickSubModel(index), apiKey: process.env.OPENROUTER_API_KEY };
 }
 
 function roleForIndex(index, preferred) {
@@ -112,6 +128,7 @@ async function runOrchestratorCycle(project, context = {}) {
   const step = context.step || 1;
   const fileNames = context.fileNames || [];
   const recentLog = context.recentLog || [];
+  const subAgentPool = context.subAgentPool || [];
   const checkpoint = project.checkpoint || {};
   const memory = checkpoint.memory || {};
   const onProgress = typeof context.onProgress === 'function' ? context.onProgress : async () => {};
@@ -282,21 +299,22 @@ async function runOrchestratorCycle(project, context = {}) {
     });
 
     subResults = await mapPool(subtasks, subConcurrency(), async (task, idx) => {
-      const model = pickSubModel(idx);
+      const { provider, model, apiKey } = pickSubAgentTarget(idx, subAgentPool);
+      const displayModel = provider === 'openrouter' ? model : `${provider}/${model}`;
       const role = roleForIndex(idx, task.role);
       const t0 = Date.now();
       await onProgress({
         stage: 'sub_agents',
-        detail: `${role} → ${model}`,
+        detail: `${role} → ${displayModel}`,
         mode: 'openrouter',
-        current_sub: { role, model, index: idx + 1, of: subtasks.length },
+        current_sub: { role, model: displayModel, index: idx + 1, of: subtasks.length },
       });
       await onEvent({
         stage: 'sub_agents',
         action: 'start',
         status: 'started',
         summary: `${role} started`,
-        model,
+        model: displayModel,
         role,
         detail: task.prompt,
       });
@@ -305,7 +323,9 @@ async function runOrchestratorCycle(project, context = {}) {
         // once, only WORKER_GLOBAL_SUBAGENT_CONCURRENCY (default 20) actually run
         // their LLM call at the same instant system-wide — the rest queue here.
         const res = await globalSubAgentSemaphore.run(() =>
-          chat({
+          callProvider({
+            provider,
+            apiKey,
             model,
             maxTokens: 900,
             temperature: 0.5,
@@ -334,7 +354,7 @@ async function runOrchestratorCycle(project, context = {}) {
           action: role,
           detail: res.content.slice(0, 4000),
           tokens: res.tokens,
-          subAgent: model,
+          subAgent: displayModel,
         });
         totalTokens += res.tokens;
         await onEvent({
@@ -343,12 +363,12 @@ async function runOrchestratorCycle(project, context = {}) {
           status: 'ok',
           summary: `${role} finished`,
           detail: res.content,
-          model,
+          model: displayModel,
           role,
           tokensUsed: res.tokens,
           durationMs: Date.now() - t0,
         });
-        return { role, model, ok: true, content: res.content, tokens: res.tokens };
+        return { role, model: displayModel, ok: true, content: res.content, tokens: res.tokens };
       } catch (err) {
         if (err.rateLimited) rateLimited = true;
         error = error || {
@@ -362,7 +382,7 @@ async function runOrchestratorCycle(project, context = {}) {
           action: `${role}_error`,
           detail: err.message,
           tokens: 20,
-          subAgent: model,
+          subAgent: displayModel,
         });
         totalTokens += 20;
         await onEvent({
@@ -372,11 +392,11 @@ async function runOrchestratorCycle(project, context = {}) {
           summary: `${role} failed: ${err.message}`,
           detail: err.message,
           errorFull: err.body || err.message,
-          model,
+          model: displayModel,
           role,
           durationMs: Date.now() - t0,
         });
-        return { role, model, ok: false, content: err.message, tokens: 20 };
+        return { role, model: displayModel, ok: false, content: err.message, tokens: 20 };
       }
     });
   } else {

@@ -162,6 +162,14 @@ export const api = {
       request(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     createAccount: (body) =>
       request('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
+    llmKeys: {
+      list: () => request('/api/admin/llm-keys'),
+      create: (body) => request('/api/admin/llm-keys', { method: 'POST', body: JSON.stringify(body) }),
+      update: (id, body) =>
+        request(`/api/admin/llm-keys/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+      test: (id) => request(`/api/admin/llm-keys/${id}/test`, { method: 'POST', body: '{}' }),
+      delete: (id) => request(`/api/admin/llm-keys/${id}`, { method: 'DELETE' }),
+    },
   },
 
   settings: {
