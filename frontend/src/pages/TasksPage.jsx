@@ -8,6 +8,7 @@ import {
   IconClock,
   IconFile,
 } from '../lib/icons';
+import { useToast } from '../components/Toast';
 
 function statusStyle(status) {
   if (status === 'done') return 'bg-emerald-100 text-success';
@@ -50,7 +51,7 @@ export default function TasksPage() {
     dueAt: '',
     feedbackRequested: true,
   });
-  const [msg, setMsg] = useState('');
+  const toast = useToast();
 
   // Drawer / task detail state
   const [selectedId, setSelectedId] = useState(null);
@@ -90,7 +91,7 @@ export default function TasksPage() {
     if (clientId) next.clientId = clientId;
     if (projectId) next.projectId = projectId;
     setSearchParams(next, { replace: true });
-    load().catch((e) => setMsg(e.message));
+    load().catch((e) => toast.error(e.message));
   }, [clientId, projectId]);
 
   async function loadComments(taskId) {
@@ -99,7 +100,7 @@ export default function TasksPage() {
       const r = await api.tasks.comments.list(taskId);
       setComments(r.comments);
     } catch (e) {
-      setMsg(e.message);
+      toast.error(e.message);
     } finally {
       setCommentsLoading(false);
     }
@@ -120,35 +121,58 @@ export default function TasksPage() {
     setRejectNote('');
   }
 
+  // ESC closes the drawer; lock body scroll while it's open.
+  useEffect(() => {
+    if (!selectedId) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeDrawer();
+    };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [selectedId]);
+
   async function create(e) {
     e.preventDefault();
-    await api.tasks.create({
-      title: form.title,
-      description: form.description,
-      clientId: form.clientId || null,
-      projectId: form.projectId || null,
-      documentId: form.documentId || null,
-      assigneeId: form.assigneeId || null,
-      dueAt: form.dueAt ? new Date(form.dueAt).toISOString() : null,
-      feedbackRequested: form.feedbackRequested,
-    });
-    setForm({
-      title: '',
-      description: '',
-      clientId: clientId || '',
-      projectId: projectId || '',
-      documentId: '',
-      assigneeId: '',
-      dueAt: '',
-      feedbackRequested: true,
-    });
-    setMsg('Feedback request sent');
-    await load();
+    try {
+      await api.tasks.create({
+        title: form.title,
+        description: form.description,
+        clientId: form.clientId || null,
+        projectId: form.projectId || null,
+        documentId: form.documentId || null,
+        assigneeId: form.assigneeId || null,
+        dueAt: form.dueAt ? new Date(form.dueAt).toISOString() : null,
+        feedbackRequested: form.feedbackRequested,
+      });
+      setForm({
+        title: '',
+        description: '',
+        clientId: clientId || '',
+        projectId: projectId || '',
+        documentId: '',
+        assigneeId: '',
+        dueAt: '',
+        feedbackRequested: true,
+      });
+      toast.success('Feedback request sent');
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   async function patch(id, body) {
-    await api.tasks.update(id, body);
-    await load();
+    try {
+      await api.tasks.update(id, body);
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   async function sendComment(e) {
@@ -160,7 +184,7 @@ export default function TasksPage() {
       await api.tasks.comments.add(selectedId, text);
       await loadComments(selectedId);
     } catch (e2) {
-      setMsg(e2.message);
+      toast.error(e2.message);
     }
   }
 
@@ -169,10 +193,11 @@ export default function TasksPage() {
     setDrawerBusy(true);
     try {
       await api.tasks.approve(selectedId);
+      toast.success('Task approved');
       await load();
       await loadComments(selectedId);
     } catch (e) {
-      setMsg(e.message);
+      toast.error(e.message);
     } finally {
       setDrawerBusy(false);
     }
@@ -186,10 +211,11 @@ export default function TasksPage() {
       await api.tasks.reject(selectedId, rejectNote.trim());
       setShowRejectBox(false);
       setRejectNote('');
+      toast.info('Task rejected — sent back to Open');
       await load();
       await loadComments(selectedId);
     } catch (e2) {
-      setMsg(e2.message);
+      toast.error(e2.message);
     } finally {
       setDrawerBusy(false);
     }
@@ -281,8 +307,6 @@ export default function TasksPage() {
         <button className="btn-primary md:col-span-2" type="submit">Send to teammate</button>
       </form>
 
-      {msg && <p className="text-sm text-muted">{msg}</p>}
-
       {view === 'board' ? (
         <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
           {COLUMNS.map((col) => {
@@ -297,7 +321,7 @@ export default function TasksPage() {
                   {colTasks.map((t) => (
                     <article
                       key={t.id}
-                      className="card p-3 border border-line flex flex-col gap-2 cursor-pointer hover:border-primary/50 transition-colors"
+                      className="card p-3 border border-line flex flex-col gap-2 cursor-pointer hover:border-primary/50 transition-colors min-w-0"
                       onClick={() => openTask(t)}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -344,7 +368,7 @@ export default function TasksPage() {
           {tasks.map((t) => (
             <article
               key={t.id}
-              className="card p-5 border border-line flex flex-col gap-3 cursor-pointer hover:border-primary/50 transition-colors"
+              className="card p-5 border border-line flex flex-col gap-3 cursor-pointer hover:border-primary/50 transition-colors min-w-0"
               onClick={() => openTask(t)}
             >
               <div className="flex items-start justify-between gap-2">

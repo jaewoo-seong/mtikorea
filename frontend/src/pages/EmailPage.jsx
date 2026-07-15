@@ -191,9 +191,13 @@ export default function EmailPage() {
   async function addNote(e) {
     e.preventDefault();
     if (!selected || !note.trim()) return;
-    await api.emails.note(selected, note.trim());
-    setNote('');
-    await openEmail(selected);
+    try {
+      await api.emails.note(selected, note.trim());
+      setNote('');
+      await openEmail(selected);
+    } catch (err) {
+      setMsg(err.message);
+    }
   }
 
   const listTitle = FOLDER_LABELS[folder] || 'Mail';

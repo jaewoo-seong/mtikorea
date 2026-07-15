@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useToast } from '../components/Toast';
 
 const TABS = ['overview', 'markdown', 'documents', 'projects', 'tasks', 'audit'];
 
@@ -32,6 +33,7 @@ export default function ClientDetailPage() {
   const [mdDirty, setMdDirty] = useState(false);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
+  const toast = useToast();
 
   async function load() {
     const d = await api.clients.get(id);
@@ -45,16 +47,24 @@ export default function ClientDetailPage() {
   }, [id]);
 
   async function saveField(field, value) {
-    await api.clients.update(id, { [field]: value });
-    setMsg('Saved');
-    await load();
+    try {
+      await api.clients.update(id, { [field]: value });
+      setMsg('Saved');
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   async function saveMarkdown() {
-    await api.clients.update(id, { profile_markdown: markdown });
-    setMdDirty(false);
-    setMsg('Markdown saved');
-    await load();
+    try {
+      await api.clients.update(id, { profile_markdown: markdown });
+      setMdDirty(false);
+      setMsg('Markdown saved');
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   if (!data) return <div className="text-muted text-sm">{error || 'Loading…'}</div>;

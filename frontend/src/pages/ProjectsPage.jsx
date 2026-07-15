@@ -254,7 +254,7 @@ export default function ProjectsPage() {
               <Link
                 key={p.id}
                 to={`/projects/${p.id}`}
-                className="card p-5 hover:shadow-mid transition block group border border-line relative"
+                className="card p-5 hover:shadow-mid transition block group border border-line relative min-w-0"
               >
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="font-semibold text-lg group-hover:text-primary transition truncate">{p.title}</h2>
@@ -278,11 +278,13 @@ export default function ProjectsPage() {
                   if (!stage && !cp.detail && !p.last_error && !p.stop_reason) return null;
                   return (
                     <div className={`mt-3 rounded-lg px-2.5 py-2 text-xs ${tc.badge} bg-opacity-60`}>
-                      <div className="font-semibold flex items-center gap-1.5">
-                        <span className={`h-1.5 w-1.5 rounded-full ${tc.dot} ${p.status === 'running' ? 'animate-pulse' : ''}`} />
-                        {p.stop_reason ? stopLabel(p.stop_reason) : stage ? stageLabel(stage) : 'Status'}
-                        {cp.mode ? ` · ${cp.mode}` : ''}
-                        {p.agent_iteration ? ` · iter ${p.agent_iteration}` : ''}
+                      <div className="font-semibold flex items-start gap-1.5">
+                        <span className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${tc.dot} ${p.status === 'running' ? 'animate-pulse' : ''}`} />
+                        <span className="min-w-0">
+                          {p.stop_reason ? stopLabel(p.stop_reason) : stage ? stageLabel(stage) : 'Status'}
+                          {cp.mode ? ` · ${cp.mode}` : ''}
+                          {p.agent_iteration ? ` · iter ${p.agent_iteration}` : ''}
+                        </span>
                       </div>
                       <div className="line-clamp-2 mt-0.5 opacity-90">
                         {p.last_error || cp.last_error || cp.detail || cp.last_summary || 'Waiting for worker…'}

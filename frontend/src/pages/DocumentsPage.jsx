@@ -2,18 +2,33 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import DocumentPreview from '../components/DocumentPreview';
+import { useToast } from '../components/Toast';
+
+function SkeletonCard() {
+  return (
+    <div className="card p-5 animate-pulse space-y-3">
+      <div className="h-4 w-2/3 bg-slate-100 rounded" />
+      <div className="h-3 w-1/2 bg-slate-100 rounded" />
+      <div className="flex gap-2">
+        <div className="h-5 w-16 bg-slate-100 rounded-full" />
+        <div className="h-5 w-16 bg-slate-100 rounded-full" />
+      </div>
+      <div className="h-8 bg-slate-100 rounded" />
+    </div>
+  );
+}
 
 export default function DocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [documents, setDocuments] = useState([]);
+  const [documents, setDocuments] = useState(null);
   const [clients, setClients] = useState([]);
   const [projects, setProjects] = useState([]);
   const [clientId, setClientId] = useState(searchParams.get('clientId') || '');
   const [projectId, setProjectId] = useState(searchParams.get('projectId') || '');
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
-  const [msg, setMsg] = useState('');
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const toast = useToast();
 
   function togglePreview(docId) {
     setExpandedIds((prev) => {
@@ -43,26 +58,34 @@ export default function DocumentsPage() {
     if (clientId) next.clientId = clientId;
     if (projectId) next.projectId = projectId;
     setSearchParams(next, { replace: true });
-    load().catch((e) => setMsg(e.message));
+    load().catch((e) => toast.error(e.message));
   }, [clientId, projectId]);
 
   async function upload(e) {
     e.preventDefault();
     if (!file) return;
-    await api.documents.upload(file, {
-      title: title || file.name,
-      clientId: clientId || undefined,
-      projectId: projectId || undefined,
-    });
-    setFile(null);
-    setTitle('');
-    setMsg('Uploaded — linked to filters above');
-    await load();
+    try {
+      await api.documents.upload(file, {
+        title: title || file.name,
+        clientId: clientId || undefined,
+        projectId: projectId || undefined,
+      });
+      setFile(null);
+      setTitle('');
+      toast.success('Uploaded — linked to filters above');
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   async function relink(docId, fields) {
-    await api.documents.update(docId, fields);
-    await load();
+    try {
+      await api.documents.update(docId, fields);
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   return (
@@ -102,11 +125,18 @@ export default function DocumentsPage() {
         <button className="btn-primary" type="submit">Upload</button>
       </form>
 
-      {msg && <p className="text-sm text-muted">{msg}</p>}
+      {documents === null && (
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      )}
 
+      {documents !== null && (
       <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
         {documents.map((d) => (
-          <article key={d.id} className="card p-5 flex flex-col gap-3 border border-line">
+          <article key={d.id} className="card p-5 flex flex-col gap-3 border border-line min-w-0">
             <div>
               <h2 className="font-semibold text-base leading-snug">{d.title}</h2>
               <p className="text-xs text-muted mt-1 truncate">{d.description || d.filename}</p>
@@ -172,7 +202,8 @@ export default function DocumentsPage() {
           </article>
         ))}
       </div>
-      {!documents.length && (
+      )}
+      {documents !== null && !documents.length && (
         <div className="card p-10 text-center text-sm text-muted">No documents for these filters</div>
       )}
     </div>

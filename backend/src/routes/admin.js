@@ -10,7 +10,7 @@ router.use(requireRole('admin'));
 router.get('/users', async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT id, email, name, avatar_url, role, active, created_at, updated_at
+      `SELECT id, email, username, name, avatar_url, role, oauth_provider, active, created_at, updated_at
        FROM users WHERE org_id = $1 ORDER BY created_at ASC`,
       [req.user.org_id]
     );

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { api } from '../lib/api';
+import { IconMenu, IconX } from '../lib/icons';
 
 const EMAIL_FOLDERS = [
   { to: '/email/inbox', label: 'Inbox' },
@@ -73,6 +74,7 @@ export default function AppLayout({ user, onLogout }) {
   // Default: email collapsed (parked), workspace open when on those routes
   const [emailOpen, setEmailOpen] = useCollapsed('mti_nav_email_open', false);
   const [workspaceOpen, setWorkspaceOpen] = useCollapsed('mti_nav_workspace_open', true);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     if (emailActive) setEmailOpen(true);
@@ -82,6 +84,11 @@ export default function AppLayout({ user, onLogout }) {
     if (workspaceActive) setWorkspaceOpen(true);
   }, [workspaceActive, setWorkspaceOpen]);
 
+  // Below lg, the sidebar is an off-canvas drawer — close it on every navigation.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
   async function logout() {
     await api.logout();
     onLogout();
@@ -89,10 +96,40 @@ export default function AppLayout({ user, onLogout }) {
 
   return (
     <div className="min-h-screen flex">
-      <aside className="w-[260px] shrink-0 border-r border-line bg-white/80 backdrop-blur px-4 py-5 flex flex-col">
-        <div className="mb-6 px-2">
-          <div className="font-display text-2xl font-semibold tracking-tight text-ink">MTI</div>
-          <div className="text-xs text-muted mt-0.5">CRM · Workspace · Agents</div>
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 bg-ink/30 z-40 lg:hidden"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+      {!mobileNavOpen && (
+        <button
+          type="button"
+          className="fixed top-3 left-3 z-40 lg:hidden rounded-lg bg-white border border-line shadow-mid p-2 text-ink"
+          onClick={() => setMobileNavOpen(true)}
+          aria-label="Open navigation"
+        >
+          <IconMenu width={18} height={18} />
+        </button>
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-[260px] shrink-0 border-r border-line bg-white px-4 py-5 flex flex-col transition-transform duration-200 lg:static lg:translate-x-0 lg:bg-white/80 lg:backdrop-blur ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="mb-6 px-2 flex items-start justify-between">
+          <div>
+            <div className="font-display text-2xl font-semibold tracking-tight text-ink">MTI</div>
+            <div className="text-xs text-muted mt-0.5">CRM · Workspace · Agents</div>
+          </div>
+          <button
+            type="button"
+            className="lg:hidden text-muted hover:text-ink p-1"
+            onClick={() => setMobileNavOpen(false)}
+            aria-label="Close navigation"
+          >
+            <IconX width={18} height={18} />
+          </button>
         </div>
 
         <nav className="flex flex-col gap-0.5 flex-1 overflow-y-auto">
@@ -159,12 +196,12 @@ export default function AppLayout({ user, onLogout }) {
       </aside>
       <div className="flex-1 min-w-0">
         {!emailActive && (
-          <header className="h-14 border-b border-line bg-white/70 backdrop-blur flex items-center justify-between px-6">
-            <div className="text-sm text-muted">Projects · Documents · Tasks</div>
-            <div className="badge bg-blue-50 text-primary">Linked workspace</div>
+          <header className="h-14 border-b border-line bg-white/70 backdrop-blur flex items-center justify-between pl-16 pr-6 lg:px-6">
+            <div className="text-sm text-muted hidden sm:block">Projects · Documents · Tasks</div>
+            <div className="badge bg-blue-50 text-primary ml-auto">Linked workspace</div>
           </header>
         )}
-        <main className={emailActive ? '' : 'p-6'}>
+        <main className={emailActive ? 'pl-14 lg:pl-0' : 'p-6'}>
           <Outlet />
         </main>
       </div>

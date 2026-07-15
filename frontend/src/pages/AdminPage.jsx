@@ -71,7 +71,9 @@ export default function AdminPage({ user }) {
               <tr key={u.id} className="border-t border-line">
                 <td className="px-4 py-3">
                   <div className="font-medium">{u.name || '—'}</div>
-                  <div className="text-muted text-xs">{u.email}</div>
+                  <div className="text-muted text-xs">
+                    {u.username ? `@${u.username}` : u.email}
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   <span className="inline-block rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-muted">
