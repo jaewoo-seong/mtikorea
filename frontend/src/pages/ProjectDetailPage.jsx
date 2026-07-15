@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useToast } from '../components/Toast';
 import {
   PIPELINE,
   buildDiagnostics,
   checkpointOf,
+  formatBudgetMinutes,
   latestEventStage,
   pipelineIndex,
   stageLabel,
@@ -123,7 +125,8 @@ export default function ProjectDetailPage() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [msg, setMsg] = useState('');
-  const [schedule, setSchedule] = useState({ allottedHours: '', dueAt: '' });
+  const [schedule, setSchedule] = useState({ timeBudgetMinutes: '', allottedHours: '', dueAt: '' });
+  const toast = useToast();
   const [taskTitle, setTaskTitle] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -136,6 +139,7 @@ export default function ProjectDetailPage() {
     const d = await api.projects.get(id);
     setData(d);
     setSchedule({
+      timeBudgetMinutes: d.project.time_budget_minutes ?? '',
       allottedHours: d.project.allotted_hours ?? '',
       dueAt: d.project.due_at ? new Date(d.project.due_at).toISOString().slice(0, 16) : '',
     });
@@ -152,25 +156,36 @@ export default function ProjectDetailPage() {
   }, [id, data?.project?.status]);
 
   async function start() {
-    await api.projects.start(id);
-    setMsg('Worker looping until token budget / rate limit / Stop');
-    await load();
+    try {
+      await api.projects.start(id);
+      toast.success('Worker looping until time budget / rate limit / Stop');
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   async function stop() {
-    await api.projects.stop(id);
-    setMsg('Paused');
-    await load();
+    try {
+      await api.projects.stop(id);
+      toast.info('Paused');
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   async function saveSchedule(e) {
     e.preventDefault();
-    await api.projects.update(id, {
-      allottedHours: schedule.allottedHours === '' ? null : Number(schedule.allottedHours),
-      dueAt: schedule.dueAt ? new Date(schedule.dueAt).toISOString() : null,
-    });
-    setMsg('Schedule updated');
-    await load();
+    try {
+      await api.projects.update(id, {
+        timeBudgetMinutes: schedule.timeBudgetMinutes === '' ? null : Number(schedule.timeBudgetMinutes),
+      });
+      toast.success('Time budget updated');
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    }
   }
 
   async function onUpload(e) {
@@ -290,6 +305,11 @@ export default function ProjectDetailPage() {
           <Link to="/projects" className="text-sm text-muted hover:text-primary">← Projects</Link>
           <h1 className="font-display text-3xl font-semibold mt-2">{project.title}</h1>
           <p className="text-sm text-muted mt-1 max-w-3xl">{project.goal}</p>
+          {project.desired_output && (
+            <p className="text-xs text-muted mt-1 max-w-3xl">
+              <span className="font-medium text-ink">Desired output:</span> {project.desired_output}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2 mt-3 text-xs">
             <span
               className={`badge inline-flex items-center gap-1.5 font-semibold ${headerToneClasses.badge}`}
@@ -330,15 +350,24 @@ export default function ProjectDetailPage() {
         <ProgressBar value={project.progressPct ?? project.progress_pct} live={live} />
         <div className="grid sm:grid-cols-4 gap-3 text-sm">
           <div className="rounded-xl bg-slate-50 p-3">
-            <div className="text-xs text-muted">Tokens</div>
-            <div className="font-mono mt-1">{project.tokens_used}/{project.token_budget}</div>
-            <div className="text-[11px] text-muted">{project.tokenPct ?? 0}% of budget</div>
+            <div className="text-xs text-muted">Tokens used</div>
+            <div className="font-mono mt-1">
+              {project.tokens_used}
+              {project.token_budget != null ? `/${project.token_budget}` : ''}
+            </div>
+            <div className="text-[11px] text-muted">
+              {project.token_budget != null ? `${project.tokenPct ?? 0}% of budget` : 'No cap — tracked for cost visibility'}
+            </div>
           </div>
           <div className="rounded-xl bg-slate-50 p-3">
-            <div className="text-xs text-muted">Hours used / allotted</div>
+            <div className="text-xs text-muted">Time used / budget</div>
             <div className="font-mono mt-1">
               {project.timePct != null ? `${project.timePct}%` : '—'}
-              {project.allotted_hours != null ? ` of ${project.allotted_hours}h` : ''}
+              {project.time_budget_minutes != null
+                ? ` of ${formatBudgetMinutes(project.time_budget_minutes)}`
+                : project.allotted_hours != null
+                  ? ` of ${project.allotted_hours}h (legacy)`
+                  : ''}
             </div>
           </div>
           <div className="rounded-xl bg-slate-50 p-3">
@@ -355,6 +384,18 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       </div>
+
+      {project.kickoff_plan && (
+        <div className="card p-5 space-y-2 border border-violet-200 bg-violet-50/40">
+          <h2 className="font-semibold flex items-center gap-2 text-violet-900">
+            <IconMessage width={16} height={16} /> Agent's kickoff plan
+          </h2>
+          <p className="text-xs text-muted">
+            What the main agent decided on its first cycle — agenda and sub-agent allocation.
+          </p>
+          <div className="text-sm whitespace-pre-wrap text-ink">{project.kickoff_plan}</div>
+        </div>
+      )}
 
       {(project.stop_reason || project.last_error) && (
         <div className="card p-5 border border-red-200 bg-red-50 space-y-2">
@@ -384,7 +425,7 @@ export default function ProjectDetailPage() {
           <div>
             <h2 className="font-semibold text-lg">Progress command center</h2>
             <p className="text-xs text-muted mt-0.5">
-              Continuous loop until token budget / rate limit / Stop
+              Continuous loop until time budget / rate limit / Stop
               {live ? ' · polling 1.5s' : ''}
               {cp.stage_at ? ` · live update ${new Date(cp.stage_at).toLocaleString()}` : ''}
             </p>
@@ -520,7 +561,7 @@ export default function ProjectDetailPage() {
                   : '—'}
             </div>
             <div>
-              Tokens {project.tokens_used}/{project.token_budget}
+              Tokens {project.tokens_used}{project.token_budget != null ? `/${project.token_budget}` : ' (no cap)'}
             </div>
             {project.claimed_by && (
               <div className="sm:col-span-3 font-mono truncate">Claimed: {project.claimed_by}</div>
@@ -677,21 +718,27 @@ export default function ProjectDetailPage() {
       </div>
 
       <form onSubmit={saveSchedule} className="card p-5 grid md:grid-cols-3 gap-3 items-end">
-        <label className="text-sm">
-          <span className="text-muted text-xs">Allotted hours</span>
-          <input className="input mt-1" type="number" min="0.5" step="0.5"
-            value={schedule.allottedHours}
-            onChange={(e) => setSchedule({ ...schedule, allottedHours: e.target.value })}
+        <label className="text-sm md:col-span-2">
+          <span className="text-muted text-xs">
+            Time budget (minutes, 5–720){' '}
+            {schedule.timeBudgetMinutes !== '' && (
+              <span className="text-ink font-medium">— {formatBudgetMinutes(Number(schedule.timeBudgetMinutes))}</span>
+            )}
+          </span>
+          <input className="input mt-1" type="number" min="5" max="720" step="5"
+            value={schedule.timeBudgetMinutes}
+            onChange={(e) => setSchedule({ ...schedule, timeBudgetMinutes: e.target.value })}
             disabled={live} />
+          {(schedule.allottedHours !== '' || schedule.dueAt !== '') && (
+            <span className="text-[11px] text-muted mt-1 block">
+              Legacy: {schedule.allottedHours !== '' ? `${schedule.allottedHours}h allotted` : ''}
+              {schedule.allottedHours !== '' && schedule.dueAt !== '' ? ' · ' : ''}
+              {schedule.dueAt !== '' ? `due ${new Date(schedule.dueAt).toLocaleString()}` : ''}
+              {' '}— set a time budget above to switch this project to the current model.
+            </span>
+          )}
         </label>
-        <label className="text-sm">
-          <span className="text-muted text-xs">Due date</span>
-          <input className="input mt-1" type="datetime-local"
-            value={schedule.dueAt}
-            onChange={(e) => setSchedule({ ...schedule, dueAt: e.target.value })}
-            disabled={live} />
-        </label>
-        <button className="btn-secondary" type="submit" disabled={live}>Save schedule</button>
+        <button className="btn-secondary" type="submit" disabled={live}>Save time budget</button>
       </form>
 
       {msg && <p className="text-sm text-muted">{msg}</p>}

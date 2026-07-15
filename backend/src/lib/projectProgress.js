@@ -11,6 +11,10 @@ function projectProgress(project, now = new Date(), agentProgressPct = null) {
       (now.getTime() - new Date(project.started_at).getTime()) / (1000 * 60 * 60);
     timePct = elapsedH / Number(project.allotted_hours);
   }
+  if (project.time_budget_minutes && project.started_at) {
+    const elapsedMin = (now.getTime() - new Date(project.started_at).getTime()) / 60000;
+    timePct = Math.max(timePct, elapsedMin / Number(project.time_budget_minutes));
+  }
 
   let duePct = 0;
   if (project.due_at && project.started_at) {

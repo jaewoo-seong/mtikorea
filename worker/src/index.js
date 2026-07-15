@@ -9,7 +9,11 @@ const { runProjectStep } = require('./projectRunner');
 
 const PORT = process.env.WORKER_PORT || process.env.PORT || 4001;
 const workerId = `worker-${crypto.randomUUID()}`;
-const MAX_CONCURRENT = Number(process.env.WORKER_MAX_CONCURRENT || 3);
+// No cap on concurrently running projects by default — every running project gets
+// claimed and worked as soon as this worker polls. Set WORKER_MAX_CONCURRENT to a
+// positive number to reintroduce a ceiling (e.g. to bound total worker memory/CPU).
+const rawMaxConcurrent = Number(process.env.WORKER_MAX_CONCURRENT);
+const MAX_CONCURRENT = Number.isFinite(rawMaxConcurrent) && rawMaxConcurrent > 0 ? rawMaxConcurrent : Infinity;
 
 function makePool() {
   const pool = new Pool({
@@ -46,7 +50,7 @@ app.get('/health', (_req, res) => {
     service: 'worker',
     workerId,
     runningCount,
-    maxConcurrent: MAX_CONCURRENT,
+    maxConcurrent: Number.isFinite(MAX_CONCURRENT) ? MAX_CONCURRENT : 'unlimited',
     hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
     hasOpenRouter: Boolean(process.env.OPENROUTER_API_KEY),
     lastClaimAt,

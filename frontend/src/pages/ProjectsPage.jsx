@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import { checkpointOf, stageLabel, stageTone, stopLabel, toneClasses } from '../lib/projectStage';
+import { checkpointOf, formatBudgetMinutes, stageLabel, stageTone, stopLabel, toneClasses } from '../lib/projectStage';
 import { IconAlert, IconCheck, IconClock, IconLoader, IconSearch } from '../lib/icons';
 import ConfirmButton from '../components/ConfirmButton';
 import { useToast } from '../components/Toast';
@@ -75,17 +75,7 @@ function timeAgo(ts) {
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState(null);
-  const [clients, setClients] = useState([]);
-  const [form, setForm] = useState({
-    title: '',
-    goal: '',
-    clientId: '',
-    tokenBudget: 50000,
-    allottedHours: 8,
-    dueAt: '',
-  });
   const [error, setError] = useState('');
-  const [showForm, setShowForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [lastRefresh, setLastRefresh] = useState(null);
@@ -94,9 +84,8 @@ export default function ProjectsPage() {
   const toast = useToast();
 
   async function load() {
-    const [p, c] = await Promise.all([api.projects.list(), api.clients.list()]);
+    const p = await api.projects.list();
     setProjects(p.projects);
-    setClients(c.clients);
     setLastRefresh(Date.now());
   }
 
@@ -111,26 +100,6 @@ export default function ProjectsPage() {
     const t = setInterval(() => forceTick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, []);
-
-  async function create(e) {
-    e.preventDefault();
-    try {
-      await api.projects.create({
-        title: form.title,
-        goal: form.goal,
-        clientId: form.clientId || null,
-        tokenBudget: Number(form.tokenBudget) || 50000,
-        allottedHours: form.allottedHours !== '' ? Number(form.allottedHours) : null,
-        dueAt: form.dueAt ? new Date(form.dueAt).toISOString() : null,
-      });
-      setForm({ title: '', goal: '', clientId: '', tokenBudget: 50000, allottedHours: 8, dueAt: '' });
-      setShowForm(false);
-      toast.success('Project created');
-      await load();
-    } catch (err) {
-      toast.error(err.message);
-    }
-  }
 
   async function removeProject(p) {
     setDeletingId(p.id);
@@ -163,39 +132,12 @@ export default function ProjectsPage() {
         <div>
           <h1 className="font-display text-3xl font-semibold">Projects</h1>
           <p className="text-sm text-muted mt-1">
-            Card workspace for agent jobs. Worker keeps running after browser close until Stop, hours, or due date.
+            Card workspace for agent jobs. Worker keeps running after browser close until time
+            budget or Stop — no cap on how many run at once.
           </p>
         </div>
-        <button type="button" className="btn-primary" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? 'Close' : 'New project'}
-        </button>
+        <Link className="btn-primary" to="/projects/new">New project</Link>
       </div>
-
-      {showForm && (
-        <form onSubmit={create} className="card p-5 grid md:grid-cols-2 gap-3">
-          <input className="input md:col-span-2" placeholder="Project title" required value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <select className="input" value={form.clientId}
-            onChange={(e) => setForm({ ...form, clientId: e.target.value })}>
-            <option value="">Link client (optional)</option>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <input className="input" type="number" min="1" step="0.5" placeholder="Allotted hours"
-            value={form.allottedHours}
-            onChange={(e) => setForm({ ...form, allottedHours: e.target.value })} />
-          <label className="text-sm text-muted flex flex-col gap-1">
-            Due date
-            <input className="input" type="datetime-local" value={form.dueAt}
-              onChange={(e) => setForm({ ...form, dueAt: e.target.value })} />
-          </label>
-          <input className="input" type="number" value={form.tokenBudget}
-            onChange={(e) => setForm({ ...form, tokenBudget: e.target.value })}
-            placeholder="Token budget" />
-          <textarea className="input md:col-span-2 min-h-[90px]" placeholder="Goal / brief"
-            value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} />
-          <button className="btn-primary md:col-span-2" type="submit">Create draft project</button>
-        </form>
-      )}
 
       {error && <p className="text-danger text-sm">{error}</p>}
 
@@ -295,7 +237,13 @@ export default function ProjectsPage() {
 
                 <div className="flex flex-wrap gap-2 mt-3 text-xs">
                   {p.client_name && <span className="badge bg-emerald-50 text-success">{p.client_name}</span>}
-                  {p.allotted_hours != null && (
+                  {p.time_budget_minutes != null && (
+                    <span className="badge bg-slate-100 text-ink inline-flex items-center gap-1">
+                      <IconClock width={11} height={11} />
+                      {formatBudgetMinutes(p.time_budget_minutes)} budget
+                    </span>
+                  )}
+                  {p.time_budget_minutes == null && p.allotted_hours != null && (
                     <span className="badge bg-slate-100 text-ink inline-flex items-center gap-1">
                       <IconClock width={11} height={11} />
                       {p.allotted_hours}h allotted

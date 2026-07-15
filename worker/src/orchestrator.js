@@ -1,11 +1,15 @@
 const { chat, getMainModel, getSubModels, hasApiKey } = require('./llm/openrouter');
 const { parseAgentJson, normalizePlan } = require('./parseAgentJson');
+const { globalSubAgentSemaphore } = require('./lib/semaphore');
 
 const ROLES = ['researcher', 'drafter', 'critic'];
 
+// Per-project, per-cycle cap on parallel sub-agents. A separate process-wide
+// semaphore (globalSubAgentSemaphore) additionally caps total concurrent
+// sub-agent calls across every project this worker is running at once.
 function subConcurrency() {
-  const n = Number(process.env.WORKER_SUBAGENT_CONCURRENCY || 3);
-  return Number.isFinite(n) && n > 0 ? Math.min(4, Math.floor(n)) : 3;
+  const n = Number(process.env.WORKER_SUBAGENT_CONCURRENCY || 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(10, Math.floor(n)) : 10;
 }
 
 function pickSubModel(index) {
@@ -34,7 +38,7 @@ Reply with ONLY valid JSON:
 Rules:
 - Spawn 1-3 subtasks free models can finish this cycle.
 - Use prior critiques and new_ideas from memory — go back, rethink, invent new angles.
-- Soft "done"/"deliverable_ready" means quality is high for this slice; the worker STILL keeps looping until token budget — keep inventing useful next work.
+- Soft "done"/"deliverable_ready" means quality is high for this slice; the worker STILL keeps looping until the time budget runs out — keep inventing useful next work.
 - Leave outputs empty on plan; synthesis may emit docs.`;
 
 const SYNTH_SYSTEM = `You are the MAIN orchestrator synthesizing sub-agent results.
@@ -114,9 +118,10 @@ async function runOrchestratorCycle(project, context = {}) {
   const onEvent = typeof context.onEvent === 'function' ? context.onEvent : async () => {};
 
   const scheduleNote = [
-    project.allotted_hours != null ? `Allotted hours: ${project.allotted_hours}` : null,
+    project.time_budget_minutes != null ? `Time budget: ${project.time_budget_minutes}m` : null,
+    project.allotted_hours != null ? `Allotted hours: ${project.allotted_hours} (legacy)` : null,
     project.due_at ? `Due: ${project.due_at}` : null,
-    `Tokens: ${project.tokens_used}/${project.token_budget}`,
+    project.token_budget != null ? `Tokens: ${project.tokens_used}/${project.token_budget}` : `Tokens used so far: ${project.tokens_used} (no cap)`,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -158,6 +163,7 @@ async function runOrchestratorCycle(project, context = {}) {
   const contextBlock = [
     `Project: ${project.title}`,
     `Goal: ${project.goal || 'n/a'}`,
+    `Desired output: ${project.desired_output || '(not specified — use your judgement based on the goal)'}`,
     `Iteration/cycle: ${step}`,
     scheduleNote,
     `Briefing files: ${fileNames.length ? fileNames.join(', ') : '(none)'}`,
@@ -295,29 +301,34 @@ async function runOrchestratorCycle(project, context = {}) {
         detail: task.prompt,
       });
       try {
-        const res = await chat({
-          model,
-          maxTokens: 900,
-          temperature: 0.5,
-          messages: [
-            {
-              role: 'system',
-              content: `You are a free ${role} sub-agent for an MTI project. Be concrete and useful. No JSON required — return markdown or plain text.`,
-            },
-            {
-              role: 'user',
-              content: [
-                `Project: ${project.title}`,
-                `Goal: ${project.goal || 'n/a'}`,
-                memoryBlock,
-                `Your role: ${role}`,
-                `Expect: ${task.expect || 'helpful output'}`,
-                `Task:\n${task.prompt}`,
-              ].join('\n'),
-            },
-          ],
-          onRetry: retryHook('sub_agents'),
-        });
+        // Global gate: even if many projects each dispatch up to 10 sub-agents at
+        // once, only WORKER_GLOBAL_SUBAGENT_CONCURRENCY (default 20) actually run
+        // their LLM call at the same instant system-wide — the rest queue here.
+        const res = await globalSubAgentSemaphore.run(() =>
+          chat({
+            model,
+            maxTokens: 900,
+            temperature: 0.5,
+            messages: [
+              {
+                role: 'system',
+                content: `You are a free ${role} sub-agent for an MTI project. Be concrete and useful. No JSON required — return markdown or plain text.`,
+              },
+              {
+                role: 'user',
+                content: [
+                  `Project: ${project.title}`,
+                  `Goal: ${project.goal || 'n/a'}`,
+                  memoryBlock,
+                  `Your role: ${role}`,
+                  `Expect: ${task.expect || 'helpful output'}`,
+                  `Task:\n${task.prompt}`,
+                ].join('\n'),
+              },
+            ],
+            onRetry: retryHook('sub_agents'),
+          })
+        );
         logs.push({
           phase: 'sub_agent_call',
           action: role,
@@ -612,6 +623,78 @@ async function runOrchestratorCycle(project, context = {}) {
     sub_ok: subOk,
     sub_fail: subFail,
     review,
+    plan: {
+      summary: plan.summary,
+      subtasks: plan.subtasks,
+      next_focus: plan.next_focus,
+      status: plan.status,
+    },
+  };
+}
+
+const WRAPUP_SYSTEM = `You are the MAIN orchestrator wrapping up a project because its time budget has been reached.
+Reply with ONLY valid JSON:
+{
+  "summary": "clear, complete summary of everything accomplished this session, written for the human stakeholder",
+  "outputs": [{ "title": "...", "content_markdown": "..." }]
+}
+Rules:
+- Always include exactly one output: a final wrap-up document summarizing what was done, key findings/drafts produced, and suggested next steps.
+- Be concrete — reference actual work from the checkpoint/memory context provided, not generic filler.
+- If a "Desired output" was specified, shape the wrap-up document to match it as closely as possible given what was actually produced.`;
+
+/**
+ * Runs once when a project's time budget is reached, instead of stopping abruptly:
+ * one focused LLM call that turns everything done so far into a final summary
+ * document, staged for approval like any other output.
+ */
+async function runWrapUpCycle(project, context = {}) {
+  const step = context.step || 1;
+  const checkpoint = project.checkpoint || {};
+  const memory = checkpoint.memory || {};
+
+  if (!hasApiKey()) {
+    return {
+      summary: `Local mock wrap-up for "${project.title}" after ${step} iteration(s). Set OPENROUTER_API_KEY for a real summary.`,
+      outputs: [
+        {
+          title: `Final summary · ${project.title}`,
+          content_markdown: `# Final summary\n\nProject: ${project.title}\nGoal: ${project.goal || 'n/a'}\n\n(Local mode — set OPENROUTER_API_KEY on the Worker for a real wrap-up.)\n`,
+        },
+      ],
+      tokens: 40,
+    };
+  }
+
+  const mainModel = getMainModel();
+  const contextBlock = [
+    `Project: ${project.title}`,
+    `Goal: ${project.goal || 'n/a'}`,
+    `Desired output: ${project.desired_output || '(not specified — use your judgement)'}`,
+    memory.last_critique ? `Last critique: ${memory.last_critique}` : null,
+    Array.isArray(memory.idea_backlog) && memory.idea_backlog.length
+      ? `Idea backlog: ${memory.idea_backlog.slice(-10).join(' | ')}`
+      : null,
+    `Checkpoint: ${JSON.stringify({ ...checkpoint, memory: undefined }).slice(0, 2500)}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const raw = await chat({
+    model: mainModel,
+    maxTokens: 2200,
+    messages: [
+      { role: 'system', content: WRAPUP_SYSTEM },
+      { role: 'user', content: contextBlock },
+    ],
+  });
+  const parsed = parseAgentJson(raw.content, { summary: 'Wrap-up complete.', outputs: [] });
+  return {
+    summary: String(parsed.summary || 'Wrap-up complete.').slice(0, 4000),
+    outputs: Array.isArray(parsed.outputs)
+      ? parsed.outputs.filter((o) => o?.title && o?.content_markdown)
+      : [],
+    tokens: raw.tokens,
   };
 }
 
@@ -708,6 +791,7 @@ function localCycle(project, step, scheduleNote) {
 
 module.exports = {
   runOrchestratorCycle,
+  runWrapUpCycle,
   parseAgentJson,
   normalizePlan,
 };

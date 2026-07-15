@@ -1,11 +1,17 @@
 /**
  * Claimed project runner: multiple think→act→review iterations per claim,
- * continuous until token budget / hours / due / user stop / rate limit.
+ * continuous until time budget / user stop / rate limit. Token usage is still
+ * recorded (for cost visibility in Settings) but no longer stops a project.
  */
 const { projectProgress } = require('../../backend/src/lib/projectProgress');
 const { saveBuffer } = require('../../backend/src/lib/storage');
-const { runOrchestratorCycle } = require('./orchestrator');
+const { runOrchestratorCycle, runWrapUpCycle } = require('./orchestrator');
 const { recordEvent, setStopReason } = require('./events');
+
+// Reasons that mean "time is up, finish gracefully" — get a wrap-up summary cycle
+// before stopping, rather than an abrupt halt. (rate_limit/fatal_error are not
+// graceful completions and skip straight to stopProject.)
+const TIME_BASED_STOP_REASONS = new Set(['time_budget', 'hours_exhausted', 'deadline']);
 
 function itersPerClaim() {
   const n = Number(process.env.WORKER_ITERS_PER_CLAIM || 5);
@@ -13,9 +19,11 @@ function itersPerClaim() {
 }
 
 function limitsHit(p, now = new Date()) {
+  // Legacy per-date deadline (projects created before the time-budget model).
   if (p.due_at && now > new Date(p.due_at)) {
     return { reason: 'deadline', message: `Due date reached (${p.due_at})` };
   }
+  // Legacy allotted-hours field (projects created before the time-budget model).
   if (p.allotted_hours && p.started_at) {
     const elapsedH = (now.getTime() - new Date(p.started_at).getTime()) / (1000 * 60 * 60);
     if (elapsedH >= Number(p.allotted_hours)) {
@@ -25,12 +33,19 @@ function limitsHit(p, now = new Date()) {
       };
     }
   }
-  if (Number(p.tokens_used) >= Number(p.token_budget)) {
-    return {
-      reason: 'token_budget',
-      message: `Token budget exhausted (${p.tokens_used}/${p.token_budget})`,
-    };
+  // Current model: a single duration budget, 5 minutes to 12 hours.
+  if (p.time_budget_minutes && p.started_at) {
+    const elapsedMin = (now.getTime() - new Date(p.started_at).getTime()) / 60000;
+    if (elapsedMin >= Number(p.time_budget_minutes)) {
+      return {
+        reason: 'time_budget',
+        message: `Time budget of ${p.time_budget_minutes}m reached (elapsed ~${elapsedMin.toFixed(1)}m)`,
+      };
+    }
   }
+  // Token budget is intentionally NOT a stop condition — tokens are still recorded
+  // (project.tokens_used, project_agent_events.tokens_used) for cost visibility in
+  // Settings, but only the time budget / user Stop / rate limit end a project now.
   return null;
 }
 
@@ -44,7 +59,11 @@ async function runProjectStep(pool, project) {
 
     const hard = limitsHit(p);
     if (hard) {
-      await stopProject(client, p, hard.reason, hard.message, hard.reason === 'token_budget' ? 'completed' : 'paused');
+      if (TIME_BASED_STOP_REASONS.has(hard.reason)) {
+        await wrapUpAndStop(client, p, hard);
+      } else {
+        await stopProject(client, p, hard.reason, hard.message, 'paused');
+      }
       return;
     }
 
@@ -64,13 +83,11 @@ async function runProjectStep(pool, project) {
 
       const hit = limitsHit(p);
       if (hit) {
-        await stopProject(
-          client,
-          p,
-          hit.reason,
-          hit.message,
-          hit.reason === 'token_budget' ? 'completed' : 'paused'
-        );
+        if (TIME_BASED_STOP_REASONS.has(hit.reason)) {
+          await wrapUpAndStop(client, p, hit);
+        } else {
+          await stopProject(client, p, hit.reason, hit.message, 'paused');
+        }
         return;
       }
 
@@ -170,6 +187,26 @@ async function runProjectStep(pool, project) {
         }
       );
       const duration = Date.now() - started;
+
+      // First-ever cycle: capture the initial plan (agenda + sub-agent allocation) as
+      // a distinct, human-readable "kickoff plan" the UI can show up front, separate
+      // from the ongoing rolling checkpoint.
+      if (cycle === 1 && !p.kickoff_plan && result.plan) {
+        const kickoffPlan = [
+          result.plan.summary ? `**Agenda:** ${result.plan.summary}` : null,
+          Array.isArray(result.plan.subtasks) && result.plan.subtasks.length
+            ? `**Sub-agent tasks planned:**\n${result.plan.subtasks
+                .map((t, i) => `${i + 1}. [${t.role}] ${t.prompt}`)
+                .join('\n')}`
+            : null,
+          result.plan.next_focus ? `**Next focus:** ${result.plan.next_focus}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+        if (kickoffPlan) {
+          await client.query(`UPDATE projects SET kickoff_plan = $2 WHERE id = $1`, [p.id, kickoffPlan]);
+        }
+      }
 
       // Rate limit → hard pause
       if (result.rateLimited) {
@@ -298,7 +335,7 @@ async function runProjectStep(pool, project) {
           : null,
         result.next_focus ? `Next: ${result.next_focus}` : null,
         result.sub_ok != null ? `Subs: ${result.sub_ok} ok / ${result.sub_fail || 0} failed` : null,
-        `Took ${Math.round(duration / 1000)}s · +${result.tokens || 0} tok · progress ${metrics.progressPct}% · budget ${updated.tokens_used}/${p.token_budget}`,
+        `Took ${Math.round(duration / 1000)}s · +${result.tokens || 0} tok (${updated.tokens_used} total) · progress ${metrics.progressPct}%`,
         'Full stage detail → Progress timeline',
       ]
         .filter(Boolean)
@@ -336,19 +373,12 @@ async function runProjectStep(pool, project) {
 
       const after = limitsHit(p);
       if (after) {
-        await stopProject(
-          client,
-          p,
-          after.reason === 'token_budget' ? 'completed_budget' : after.reason,
-          after.message,
-          after.reason === 'token_budget' ? 'completed' : 'paused',
-          metrics.progressPct
-        );
-        await chatNote(
-          client,
-          p,
-          `**Stopped — ${after.reason}**\n${after.message}`
-        );
+        if (TIME_BASED_STOP_REASONS.has(after.reason)) {
+          await wrapUpAndStop(client, p, after, metrics.progressPct);
+        } else {
+          await stopProject(client, p, after.reason, after.message, 'paused', metrics.progressPct);
+          await chatNote(client, p, `**Stopped — ${after.reason}**\n${after.message}`);
+        }
         return;
       }
     }
@@ -367,7 +397,7 @@ async function runProjectStep(pool, project) {
       action: 'claim_release',
       status: 'ok',
       summary: 'Claim released — looping resumes on next claim',
-      detail: `WORKER_ITERS_PER_CLAIM=${maxIters}. Still running until token budget / stop / rate limit.`,
+      detail: `WORKER_ITERS_PER_CLAIM=${maxIters}. Still running until time budget / stop / rate limit.`,
     });
     await client.query(
       `UPDATE projects SET claimed_by = NULL, claimed_at = NULL, updated_at = now()
@@ -415,6 +445,71 @@ async function writeCheckpoint(client, projectId, patch) {
      WHERE id = $1 AND status = 'running'`,
     [projectId, JSON.stringify(body)]
   );
+}
+
+/**
+ * Time's up: run one focused wrap-up cycle that turns everything done so far into a
+ * final summary document, then stop — instead of just halting mid-thought.
+ */
+async function wrapUpAndStop(client, p, hit, progressPct = null) {
+  const cycle = Number(p.agent_iteration || 0) + 1;
+  await writeCheckpoint(client, p.id, {
+    stage: 'saving',
+    detail: 'Time budget reached — wrapping up with a final summary',
+    cycle,
+  });
+  await recordEvent(client, {
+    projectId: p.id,
+    orgId: p.org_id,
+    cycle,
+    stage: 'control',
+    action: 'wrap_up_start',
+    status: 'started',
+    summary: 'Time budget reached — generating final summary',
+    detail: hit.message,
+  });
+
+  let result = null;
+  try {
+    result = await runWrapUpCycle(p, { step: cycle });
+  } catch (err) {
+    await recordEvent(client, {
+      projectId: p.id,
+      orgId: p.org_id,
+      cycle,
+      stage: 'control',
+      action: 'wrap_up_error',
+      status: 'error',
+      summary: `Wrap-up failed: ${err.message}`,
+      errorFull: err.body || err.message,
+    });
+  }
+
+  if (result?.tokens) {
+    await client.query(
+      `UPDATE projects SET tokens_used = tokens_used + $2, updated_at = now() WHERE id = $1`,
+      [p.id, result.tokens]
+    );
+  }
+  if (result?.summary) {
+    await chatNote(client, p, `**Final summary**\n${result.summary}`);
+  }
+  for (const out of result?.outputs || []) {
+    await stageDoc(client, p, out);
+  }
+
+  await recordEvent(client, {
+    projectId: p.id,
+    orgId: p.org_id,
+    cycle,
+    stage: 'control',
+    action: 'wrap_up_done',
+    status: 'ok',
+    summary: result ? 'Wrap-up complete' : 'Wrap-up skipped (error above)',
+    tokensUsed: result?.tokens || 0,
+  });
+
+  await stopProject(client, p, hit.reason, hit.message, 'completed', progressPct ?? 100);
 }
 
 async function stopProject(client, p, stopReason, message, status, progressPct = null) {

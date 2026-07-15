@@ -5,6 +5,10 @@ const { requireAuth } = require('../lib/auth');
 const { saveBuffer, resolvePath } = require('../lib/storage');
 const { projectProgress } = require('../lib/projectProgress');
 const { recordEvent } = require('../lib/agentEvents');
+const { cleanPrompt } = require('../lib/llm');
+
+const MIN_TIME_BUDGET_MINUTES = 5;
+const MAX_TIME_BUDGET_MINUTES = 720; // 12 hours
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const router = express.Router();
@@ -171,23 +175,48 @@ router.get('/:id/logs/stream', async (req, res, next) => {
   }
 });
 
+router.post('/clean-prompt', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const raw = String(req.body?.rawText || '').trim();
+    if (!raw) return res.status(400).json({ error: 'rawText required' });
+    const cleanedPrompt = await cleanPrompt(raw);
+    res.json({ cleanedPrompt });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 router.post('/', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
-    const { title, goal, clientId, tokenBudget, allottedHours, dueAt } = req.body || {};
+    const { title, goal, clientId, timeBudgetMinutes, desiredOutput } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title required' });
+    let minutes = null;
+    if (timeBudgetMinutes != null && timeBudgetMinutes !== '') {
+      minutes = Math.round(Number(timeBudgetMinutes));
+      if (
+        !Number.isFinite(minutes) ||
+        minutes < MIN_TIME_BUDGET_MINUTES ||
+        minutes > MAX_TIME_BUDGET_MINUTES
+      ) {
+        return res.status(400).json({
+          error: `timeBudgetMinutes must be between ${MIN_TIME_BUDGET_MINUTES} and ${MAX_TIME_BUDGET_MINUTES}`,
+        });
+      }
+    }
     const { rows } = await query(
       `INSERT INTO projects (
-         org_id, client_id, title, goal, token_budget, allotted_hours, due_at, created_by, status
-       ) VALUES ($1,$2,$3,$4,COALESCE($5,50000),$6,$7,$8,'draft') RETURNING *`,
+         org_id, client_id, title, goal, time_budget_minutes, desired_output, created_by, status
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'draft') RETURNING *`,
       [
         req.user.org_id,
         clientId || null,
         title,
         goal || null,
-        tokenBudget || null,
-        allottedHours != null && allottedHours !== '' ? Number(allottedHours) : null,
-        dueAt || null,
+        minutes,
+        desiredOutput || null,
         req.user.id,
       ]
     );
@@ -207,6 +236,8 @@ router.patch('/:id', async (req, res, next) => {
       tokenBudget: 'token_budget',
       allottedHours: 'allotted_hours',
       dueAt: 'due_at',
+      timeBudgetMinutes: 'time_budget_minutes',
+      desiredOutput: 'desired_output',
     };
     const updates = [];
     const params = [];
@@ -301,7 +332,12 @@ router.post('/:id/start', async (req, res, next) => {
     if (!rows[0]) {
       return res.status(409).json({ error: 'Project not startable (must be draft or paused)' });
     }
-    const detail = `User started. Hours=${rows[0].allotted_hours || '∞'} due=${rows[0].due_at || 'none'} budget=${rows[0].token_budget}. Loops until budget / rate limit / Stop.`;
+    const timeBudgetLabel = rows[0].time_budget_minutes
+      ? `${rows[0].time_budget_minutes}m`
+      : rows[0].allotted_hours
+        ? `${rows[0].allotted_hours}h (legacy)`
+        : '∞';
+    const detail = `User started. Time budget=${timeBudgetLabel} due=${rows[0].due_at || 'none'}. Loops until time budget / rate limit / Stop, then wraps up with a summary.`;
     await query(
       `INSERT INTO agent_work_log (project_id, step_number, phase, action, detail, tokens_used)
        VALUES ($1, COALESCE((SELECT MAX(step_number) FROM agent_work_log WHERE project_id = $1),0)+1,

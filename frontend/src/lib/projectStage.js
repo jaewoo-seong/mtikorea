@@ -26,6 +26,7 @@ const ORDER = [
 ];
 
 export const STOP_LABELS = {
+  time_budget: 'Finished — time budget reached',
   token_budget: 'Token budget exhausted',
   completed_budget: 'Finished — token budget used',
   hours_exhausted: 'Allotted hours reached',
@@ -154,4 +155,13 @@ export function buildDiagnostics(project, logs = [], errors = [], events = []) {
   }
 
   return tips;
+}
+
+/** "45m" / "1h 30m" / "12h" — compact duration label for time-budget minutes. */
+export function formatBudgetMinutes(m) {
+  if (m == null) return null;
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem ? `${h}h ${rem}m` : `${h}h`;
 }

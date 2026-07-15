@@ -7,6 +7,7 @@ import ClientsPage from './pages/ClientsPage';
 import ClientDetailPage from './pages/ClientDetailPage';
 import EmailPage from './pages/EmailPage';
 import ProjectsPage from './pages/ProjectsPage';
+import NewProjectPage from './pages/NewProjectPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import DocumentsPage from './pages/DocumentsPage';
 import TasksPage from './pages/TasksPage';
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="/email" element={<Navigate to="/email/inbox" replace />} />
         <Route path="/email/:folder" element={<EmailPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
+        <Route path="/projects/new" element={<NewProjectPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
         <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/tasks" element={<TasksPage />} />

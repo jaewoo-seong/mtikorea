@@ -91,6 +91,8 @@ export const api = {
     list: () => request('/api/projects'),
     get: (id) => request(`/api/projects/${id}`),
     create: (body) => request('/api/projects', { method: 'POST', body: JSON.stringify(body) }),
+    cleanPrompt: (rawText) =>
+      request('/api/projects/clean-prompt', { method: 'POST', body: JSON.stringify({ rawText }) }),
     update: (id, body) =>
       request(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     start: (id) => request(`/api/projects/${id}/start`, { method: 'POST', body: '{}' }),
