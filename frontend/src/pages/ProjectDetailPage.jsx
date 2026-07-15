@@ -5,8 +5,10 @@ import {
   PIPELINE,
   buildDiagnostics,
   checkpointOf,
+  latestEventStage,
   pipelineIndex,
   stageLabel,
+  stopLabel,
 } from '../lib/projectStage';
 
 function ProgressBar({ value, live }) {
@@ -38,6 +40,8 @@ export default function ProjectDetailPage() {
   const [taskTitle, setTaskTitle] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [stageFilter, setStageFilter] = useState('all');
+  const [expandedEvent, setExpandedEvent] = useState(null);
 
   async function load() {
     const d = await api.projects.get(id);
@@ -50,13 +54,17 @@ export default function ProjectDetailPage() {
 
   useEffect(() => {
     load().catch((e) => setMsg(e.message));
-    const t = setInterval(() => load().catch(() => {}), 2500);
-    return () => clearInterval(t);
   }, [id]);
+
+  useEffect(() => {
+    const running = data?.project?.status === 'running';
+    const t = setInterval(() => load().catch(() => {}), running ? 1500 : 4000);
+    return () => clearInterval(t);
+  }, [id, data?.project?.status]);
 
   async function start() {
     await api.projects.start(id);
-    setMsg('Worker claimed — agents run until Stop / hours / due date');
+    setMsg('Worker looping until token budget / rate limit / Stop');
     await load();
   }
 
@@ -143,16 +151,19 @@ export default function ProjectDetailPage() {
     tasks = [],
     logs,
     results,
+    events = [],
   } = data;
   const live = project.status === 'running';
   const errors = messages.filter((m) => m.role === 'error');
   const cp = checkpointOf(project);
-  const diagnostics = buildDiagnostics(project, logs, errors);
-  const activeStage = cp.stage || (live ? 'queued' : project.status === 'completed' ? 'done' : 'idle');
+  const diagnostics = buildDiagnostics(project, logs, errors, events);
+  const activeStage = latestEventStage(events, project);
   const activeIdx = pipelineIndex(activeStage);
   const displayPipeline = PIPELINE.filter((s) =>
-    ['queued', 'planning', 'sub_agents', 'synthesizing', 'persisting', 'idle'].includes(s.id)
+    ['planning', 'sub_agents', 'synthesis', 'review', 'saving'].includes(s.id)
   );
+  const filteredEvents =
+    stageFilter === 'all' ? events : events.filter((e) => e.stage === stageFilter);
 
   return (
     <div className="space-y-6">
@@ -229,28 +240,58 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
+      {(project.stop_reason || project.last_error) && (
+        <div className="card p-5 border border-red-200 bg-red-50 space-y-2">
+          <div className="font-semibold text-danger text-lg">
+            Why it stopped: {stopLabel(project.stop_reason) || 'Error'}
+          </div>
+          <p className="text-sm text-danger/90 whitespace-pre-wrap">
+            {project.last_error || cp.detail || 'No error text stored'}
+          </p>
+          <div className="text-xs text-muted">
+            reason code: <span className="font-mono">{project.stop_reason || '—'}</span>
+            {' · '}iteration {project.agent_iteration ?? 0}
+          </div>
+          <button
+            type="button"
+            className="btn-ghost text-xs"
+            onClick={() => navigator.clipboard?.writeText(project.last_error || '')}
+          >
+            Copy full error
+          </button>
+        </div>
+      )}
+
       <div className="card p-5 space-y-4 border border-line">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <h2 className="font-semibold">Agent stage report</h2>
+            <h2 className="font-semibold text-lg">Progress command center</h2>
             <p className="text-xs text-muted mt-0.5">
-              Live pipeline · polls every ~2.5s
-              {cp.stage_at ? ` · updated ${new Date(cp.stage_at).toLocaleString()}` : ''}
+              Continuous loop until token budget / rate limit / Stop
+              {live ? ' · polling 1.5s' : ''}
+              {cp.stage_at ? ` · live update ${new Date(cp.stage_at).toLocaleString()}` : ''}
             </p>
           </div>
-          {cp.status && (
-            <span className="badge bg-slate-100 font-mono text-xs">agent: {cp.status}</span>
-          )}
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="badge bg-slate-100">Iter #{project.agent_iteration ?? cp.cycle ?? 0}</span>
+            {cp.mode && <span className="badge bg-violet-50 text-violet-700">{cp.mode}</span>}
+            {cp.status && <span className="badge bg-slate-100 font-mono">agent: {cp.status}</span>}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
           {displayPipeline.map((s, idx) => {
-            const current = s.id === activeStage;
-            const done = activeIdx >= 0 && idx < activeIdx && !['error', 'blocked'].includes(activeStage);
+            const current = s.id === activeStage || (activeStage === 'waiting_retry' && s.id === 'planning');
+            const done =
+              activeIdx >= 0 &&
+              pipelineIndex(s.id) < activeIdx &&
+              !['error', 'blocked', 'waiting_retry'].includes(activeStage);
             return (
-              <div
+              <button
+                type="button"
                 key={s.id}
-                className={`rounded-lg px-3 py-2 text-xs border min-w-[6.5rem] ${
+                onClick={() => setStageFilter(s.id)}
+                className={`rounded-lg px-3 py-2 text-xs border min-w-[5.5rem] text-left ${
                   current
                     ? 'border-primary bg-blue-50 text-primary font-semibold'
                     : done
@@ -261,15 +302,17 @@ export default function ProjectDetailPage() {
                 <div className="uppercase tracking-wide text-[10px] opacity-70">{idx + 1}</div>
                 {s.label}
                 {current && live && <span className="ml-1 animate-pulse">●</span>}
-              </div>
+              </button>
             );
           })}
-          {(['error', 'blocked', 'done'].includes(activeStage)) && (
+          {(['error', 'blocked', 'done', 'waiting_retry', 'idle', 'queued'].includes(activeStage)) && (
             <div
-              className={`rounded-lg px-3 py-2 text-xs border min-w-[6.5rem] font-semibold ${
+              className={`rounded-lg px-3 py-2 text-xs border min-w-[5.5rem] font-semibold ${
                 activeStage === 'done'
                   ? 'border-emerald-200 bg-emerald-50 text-success'
-                  : 'border-red-200 bg-red-50 text-danger'
+                  : activeStage === 'idle' || activeStage === 'queued'
+                    ? 'border-line bg-slate-50'
+                    : 'border-red-200 bg-red-50 text-danger'
               }`}
             >
               {stageLabel(activeStage)}
@@ -280,7 +323,7 @@ export default function ProjectDetailPage() {
         <div className="rounded-xl bg-slate-50 border border-line p-3 text-sm space-y-2">
           <div>
             <span className="text-xs text-muted">Now</span>
-            <p className="mt-0.5 whitespace-pre-wrap">{cp.detail || 'No stage detail yet'}</p>
+            <p className="mt-0.5 whitespace-pre-wrap font-medium">{cp.detail || events[0]?.summary || 'Waiting for worker…'}</p>
           </div>
           {cp.last_summary && (
             <div className="border-t border-line pt-2">
@@ -294,21 +337,43 @@ export default function ProjectDetailPage() {
               <p className="mt-0.5">{cp.next_focus}</p>
             </div>
           )}
+          {cp.memory?.last_critique && (
+            <div className="border-t border-line pt-2">
+              <span className="text-xs text-muted">Last critique (rethink)</span>
+              <p className="mt-0.5 whitespace-pre-wrap text-muted">{cp.memory.last_critique}</p>
+            </div>
+          )}
+          {!!cp.memory?.idea_backlog?.length && (
+            <div className="border-t border-line pt-2">
+              <span className="text-xs text-muted">Idea backlog</span>
+              <ul className="mt-1 list-disc pl-4 text-muted">
+                {cp.memory.idea_backlog.slice(-6).map((idea, i) => (
+                  <li key={i}>{idea}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="border-t border-line pt-2 grid sm:grid-cols-3 gap-2 text-xs text-muted">
-            <div>Cycle #{cp.last_step || cp.cycle || '—'}</div>
             <div>Model: {cp.main_model || '—'}</div>
             <div>
               Subs:{' '}
-              {cp.sub_ok != null ? `${cp.sub_ok} ok / ${cp.sub_fail || 0} fail` : cp.subtask_count != null ? `${cp.subtask_count} queued` : '—'}
+              {cp.sub_ok != null
+                ? `${cp.sub_ok} ok / ${cp.sub_fail || 0} fail`
+                : cp.subtask_count != null
+                  ? `${cp.subtask_count} queued`
+                  : '—'}
+            </div>
+            <div>
+              Tokens {project.tokens_used}/{project.token_budget}
             </div>
             {cp.current_sub && (
               <div className="sm:col-span-3 text-primary">
-                Active sub: {cp.current_sub.role} → {cp.current_sub.model} ({cp.current_sub.index}/{cp.current_sub.of})
+                Active sub: {cp.current_sub.role} → {cp.current_sub.model} ({cp.current_sub.index}/
+                {cp.current_sub.of})
               </div>
             )}
-            {cp.cycle_ms != null && <div>Last cycle: {Math.round(Number(cp.cycle_ms) / 1000)}s</div>}
             {project.claimed_by && (
-              <div className="sm:col-span-2 font-mono truncate">Claimed: {project.claimed_by}</div>
+              <div className="sm:col-span-3 font-mono truncate">Claimed: {project.claimed_by}</div>
             )}
           </div>
         </div>
@@ -332,32 +397,96 @@ export default function ProjectDetailPage() {
           </div>
         )}
 
-        {!!errors.length && (
-          <div className="border-t border-line pt-3 space-y-2">
-            <div className="font-semibold text-danger text-sm">Recent errors</div>
-            {errors.slice(-8).map((m) => (
-              <div key={m.id} className="text-danger/90 text-xs whitespace-pre-wrap rounded-lg bg-red-50 px-3 py-2">
-                <div className="text-[10px] text-muted mb-1">{new Date(m.created_at).toLocaleString()}</div>
-                {m.error_code && <span className="font-mono mr-2">[{m.error_code}]</span>}
-                {m.content}
-              </div>
-            ))}
+        <div className="border-t border-line pt-3 space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h3 className="font-semibold text-sm">Full event timeline ({events.length})</h3>
+            <div className="flex gap-2 items-center">
+              <select
+                className="input text-xs py-1"
+                value={stageFilter}
+                onChange={(e) => setStageFilter(e.target.value)}
+              >
+                <option value="all">All stages</option>
+                {PIPELINE.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </select>
+              {stageFilter !== 'all' && (
+                <button type="button" className="btn-ghost text-xs" onClick={() => setStageFilter('all')}>
+                  Clear filter
+                </button>
+              )}
+            </div>
           </div>
-        )}
-
-        <div className="border-t border-line pt-3">
-          <div className="font-semibold text-sm mb-2">Phase timeline (latest 12)</div>
-          <div className="space-y-2 max-h-48 overflow-y-auto">
-            {[...logs].reverse().slice(0, 12).map((l) => (
-              <div key={l.id} className="text-xs pl-3 border-l-2 border-primary/25">
-                <div className="font-mono text-muted">
-                  #{l.step_number} · {l.phase}/{l.action}
-                  {l.sub_agent ? ` · ${l.sub_agent}` : ''}
+          <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+            {filteredEvents.map((e) => {
+              const open = expandedEvent === e.id;
+              const isErr = e.status === 'error' || e.error_full;
+              return (
+                <div
+                  key={e.id}
+                  className={`rounded-lg border px-3 py-2 text-xs ${
+                    isErr ? 'border-red-200 bg-red-50/60' : 'border-line bg-white'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    className="w-full text-left"
+                    onClick={() => setExpandedEvent(open ? null : e.id)}
+                  >
+                    <div className="flex flex-wrap gap-x-2 gap-y-1 items-baseline">
+                      <span className="font-mono text-muted">
+                        #{e.cycle}.{e.seq}
+                      </span>
+                      <span className="font-semibold">{stageLabel(e.stage)}</span>
+                      <span className="text-muted">{e.action || e.status}</span>
+                      {e.model && <span className="font-mono text-[10px] text-muted">{e.model}</span>}
+                      {e.role && <span className="badge bg-slate-100">{e.role}</span>}
+                      <span className="text-muted ml-auto">
+                        {new Date(e.created_at).toLocaleString()}
+                        {e.duration_ms != null ? ` · ${e.duration_ms}ms` : ''}
+                        {e.tokens_used ? ` · ${e.tokens_used} tok` : ''}
+                      </span>
+                    </div>
+                    <p className={`mt-1 ${open ? 'whitespace-pre-wrap' : 'line-clamp-2'}`}>
+                      {e.summary || e.detail || '(no summary)'}
+                    </p>
+                  </button>
+                  {open && (
+                    <div className="mt-2 space-y-2 border-t border-line pt-2">
+                      {e.detail && (
+                        <div>
+                          <div className="text-[10px] uppercase text-muted mb-0.5">Detail</div>
+                          <pre className="whitespace-pre-wrap break-words text-[11px] bg-slate-50 p-2 rounded max-h-64 overflow-y-auto">
+                            {e.detail}
+                          </pre>
+                        </div>
+                      )}
+                      {e.error_full && (
+                        <div>
+                          <div className="text-[10px] uppercase text-danger mb-0.5">Full error</div>
+                          <pre className="whitespace-pre-wrap break-words text-[11px] bg-red-100/50 p-2 rounded max-h-80 overflow-y-auto text-danger">
+                            {e.error_full}
+                          </pre>
+                          <button
+                            type="button"
+                            className="btn-ghost text-[10px] mt-1"
+                            onClick={() => navigator.clipboard?.writeText(e.error_full)}
+                          >
+                            Copy error
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="whitespace-pre-wrap line-clamp-3 mt-0.5">{l.detail}</div>
-              </div>
-            ))}
-            {!logs.length && <p className="text-xs text-muted">No work log yet</p>}
+              );
+            })}
+            {!filteredEvents.length && (
+              <p className="text-xs text-muted">
+                No events yet. Start the project and keep Worker running — every planning / sub-agent / synthesis / review / save step lands here.
+              </p>
+            )}
           </div>
         </div>
       </div>

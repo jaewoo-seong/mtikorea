@@ -4,6 +4,7 @@ const { query } = require('../lib/db');
 const { requireAuth } = require('../lib/auth');
 const { saveBuffer, resolvePath } = require('../lib/storage');
 const { projectProgress } = require('../lib/projectProgress');
+const { recordEvent } = require('../lib/agentEvents');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const router = express.Router();
@@ -86,6 +87,13 @@ router.get('/:id', async (req, res, next) => {
        ORDER BY t.updated_at DESC`,
       [req.params.id, req.user.org_id]
     );
+    const events = await query(
+      `SELECT * FROM project_agent_events
+       WHERE project_id = $1
+       ORDER BY created_at DESC
+       LIMIT 300`,
+      [req.params.id]
+    );
     res.json({
       project,
       files: files.rows,
@@ -95,7 +103,31 @@ router.get('/:id', async (req, res, next) => {
       tasks: tasks.rows,
       logs: logs.rows.reverse(),
       results: results.rows,
+      events: events.rows,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:id/events', async (req, res, next) => {
+  try {
+    const project = await query(
+      'SELECT id FROM projects WHERE id = $1 AND org_id = $2',
+      [req.params.id, req.user.org_id]
+    );
+    if (!project.rows[0]) return res.status(404).json({ error: 'Not found' });
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 300));
+    const before = req.query.before || null;
+    const { rows } = await query(
+      `SELECT * FROM project_agent_events
+       WHERE project_id = $1
+         AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)
+       ORDER BY created_at DESC
+       LIMIT $3`,
+      [req.params.id, before, limit]
+    );
+    res.json({ events: rows });
   } catch (err) {
     next(err);
   }
@@ -259,7 +291,9 @@ router.post('/:id/start', async (req, res, next) => {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
     const { rows } = await query(
       `UPDATE projects SET status = 'running', started_at = COALESCE(started_at, now()),
-         stopped_at = NULL, claimed_by = NULL, claimed_at = NULL, updated_at = now()
+         stopped_at = NULL, stop_reason = NULL, last_error = NULL,
+         claimed_by = NULL, claimed_at = NULL, updated_at = now(),
+         checkpoint = COALESCE(checkpoint, '{}'::jsonb) || '{"stage":"queued","detail":"User started — waiting for worker claim"}'::jsonb
        WHERE id = $1 AND org_id = $2 AND status IN ('draft','paused')
        RETURNING *`,
       [req.params.id, req.user.org_id]
@@ -267,15 +301,23 @@ router.post('/:id/start', async (req, res, next) => {
     if (!rows[0]) {
       return res.status(409).json({ error: 'Project not startable (must be draft or paused)' });
     }
+    const detail = `User started. Hours=${rows[0].allotted_hours || '∞'} due=${rows[0].due_at || 'none'} budget=${rows[0].token_budget}. Loops until budget / rate limit / Stop.`;
     await query(
       `INSERT INTO agent_work_log (project_id, step_number, phase, action, detail, tokens_used)
        VALUES ($1, COALESCE((SELECT MAX(step_number) FROM agent_work_log WHERE project_id = $1),0)+1,
                'control', 'start', $2, 0)`,
-      [
-        req.params.id,
-        `User started project. Hours=${rows[0].allotted_hours || '∞'} due=${rows[0].due_at || 'none'}`,
-      ]
+      [req.params.id, detail]
     );
+    await recordEvent(query, {
+      projectId: req.params.id,
+      orgId: req.user.org_id,
+      cycle: rows[0].agent_iteration || 0,
+      stage: 'control',
+      action: 'start',
+      status: 'ok',
+      summary: 'User started project',
+      detail,
+    });
     res.json({ project: withProgress(rows[0]) });
   } catch (err) {
     next(err);
@@ -287,7 +329,9 @@ router.post('/:id/stop', async (req, res, next) => {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
     const { rows } = await query(
       `UPDATE projects SET status = 'paused', stopped_at = now(),
-         claimed_by = NULL, claimed_at = NULL, updated_at = now()
+         stop_reason = 'user_stop', last_error = 'User stopped the project',
+         claimed_by = NULL, claimed_at = NULL, updated_at = now(),
+         checkpoint = COALESCE(checkpoint, '{}'::jsonb) || '{"stage":"error","detail":"User stopped","stop_reason":"user_stop"}'::jsonb
        WHERE id = $1 AND org_id = $2 AND status = 'running'
        RETURNING *`,
       [req.params.id, req.user.org_id]
@@ -299,6 +343,44 @@ router.post('/:id/stop', async (req, res, next) => {
                'control', 'stop', 'User stopped project', 0)`,
       [req.params.id]
     );
+    await recordEvent(query, {
+      projectId: req.params.id,
+      orgId: req.user.org_id,
+      cycle: rows[0].agent_iteration || 0,
+      stage: 'control',
+      action: 'user_stop',
+      status: 'error',
+      summary: 'Stopped: user_stop',
+      detail: 'User stopped the project',
+      errorFull: 'User stopped the project',
+    });
+    res.json({ project: withProgress(rows[0]) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/complete', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const { rows } = await query(
+      `UPDATE projects SET status = 'completed', completed_at = now(), progress_pct = 100,
+         stop_reason = COALESCE(stop_reason, 'user_complete'),
+         claimed_by = NULL, updated_at = now()
+       WHERE id = $1 AND org_id = $2
+       RETURNING *`,
+      [req.params.id, req.user.org_id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    await recordEvent(query, {
+      projectId: req.params.id,
+      orgId: req.user.org_id,
+      cycle: rows[0].agent_iteration || 0,
+      stage: 'control',
+      action: 'user_complete',
+      status: 'ok',
+      summary: 'Marked complete by user',
+    });
     res.json({ project: withProgress(rows[0]) });
   } catch (err) {
     next(err);
@@ -336,22 +418,6 @@ router.post('/:id/messages', async (req, res, next) => {
     );
 
     res.status(201).json({ messages: [userMsg.rows[0], assistant.rows[0]] });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.post('/:id/complete', async (req, res, next) => {
-  try {
-    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
-    const { rows } = await query(
-      `UPDATE projects SET status = 'completed', completed_at = now(), progress_pct = 100,
-         claimed_by = NULL, updated_at = now()
-       WHERE id = $1 AND org_id = $2
-       RETURNING *`,
-      [req.params.id, req.user.org_id]
-    );
-    res.json({ project: withProgress(rows[0]) });
   } catch (err) {
     next(err);
   }

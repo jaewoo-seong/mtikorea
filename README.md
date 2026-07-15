@@ -57,10 +57,8 @@ Full Railway + keys guide: [docs/RAILWAY_SETUP.md](docs/RAILWAY_SETUP.md)
 ## Agents
 
 - Draft projects use **zero tokens** until **Start**
-- Background **Worker** service loops: `claim_next_project()` → one orchestrator cycle → release
-- **Main model** (OpenRouter): `OPENROUTER_MAIN_MODEL` default `anthropic/claude-haiku-4.5`
-- **Free sub-agents**: `OPENROUTER_SUB_MODELS` (research / draft / critique in parallel)
-- Main identifies outputs; synth stages markdown docs for Approve → Shared docs
-- Agent may push `progress_pct`; merged with token/time/due floors
-- **Stop** → `paused` + release claim
-- Set `OPENROUTER_API_KEY` on local `.env` and Railway **Worker** Variables ([keys](https://openrouter.ai/keys)); without key, local synthetic cycles still run
+- Worker: `claim_next_project` → up to `WORKER_ITERS_PER_CLAIM` of **plan → subs → synth → review** → release → repeat while running
+- Keeps reinventing / going back until **token budget** or **rate limit** (or hours/due/Stop) — soft “done” does not end early
+- Full timeline in `project_agent_events` (UI Progress command center) with stage + full error + `stop_reason`
+- **Main model**: `OPENROUTER_MAIN_MODEL` = `anthropic/claude-haiku-4.5`; free subs via `OPENROUTER_SUB_MODELS`
+- Set `OPENROUTER_API_KEY` on Worker ([keys](https://openrouter.ai/keys))

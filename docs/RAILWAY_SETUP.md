@@ -88,12 +88,16 @@ OPENROUTER_MAIN_MODEL=anthropic/claude-haiku-4.5
 OPENROUTER_SUB_MODELS=meta-llama/llama-3.3-70b-instruct:free,google/gemma-3-27b-it:free,mistralai/mistral-small-3.1-24b-instruct:free
 WORKER_MAX_CONCURRENT=3
 WORKER_SUBAGENT_CONCURRENCY=3
+WORKER_ITERS_PER_CLAIM=5
+OPENROUTER_MAX_RETRIES=3
 WORKER_PORT=4001
 ```
 
-4. How it runs: loop → `claim_next_project` → one **orchestrator cycle** (Haiku plans → free subs in parallel → Haiku synth → stage docs / push progress) → release claim → repeat. UI: Project **Start** → chat + work log update; **Approve** staged docs → Shared docs.
+4. How it runs: loop → `claim_next_project` → up to `WORKER_ITERS_PER_CLAIM` iterations of **plan → free sub-agents → synth → review/rethink** → release claim → re-claim while still `running`. Continues until **token budget**, **rate limit** (after retries), hours/due, or user **Stop**. Soft agent “done” does **not** stop early.
 
-Without `OPENROUTER_API_KEY`, worker still advances with local synthetic cycles (no real LLM).
+5. Progress UI: project detail **Progress command center** shows live stage + full event timeline (every planning/sub/synthesis/review/save + full errors + `stop_reason`).
+
+Without `OPENROUTER_API_KEY`, worker still advances with local synthetic iterations (no real LLM).
 
 ### 4. Frontend
 - **Option A (simplest):** API already serves `frontend/dist` after `npm run build`. One public domain = API service.

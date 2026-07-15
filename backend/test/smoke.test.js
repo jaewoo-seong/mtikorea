@@ -53,9 +53,19 @@ describe('MTI CRM scaffold', () => {
       'utf8'
     );
     assert.match(runner, /runOrchestratorCycle/);
-    assert.match(orch, /anthropic\/claude-haiku-4\.5|getMainModel/);
+    assert.match(runner, /WORKER_ITERS_PER_CLAIM|itersPerClaim/);
+    assert.match(orch, /REVIEW_SYSTEM|getMainModel/);
     assert.ok(
       fs.existsSync(path.join(__dirname, '../../worker/src/llm/openrouter.js'))
     );
+  });
+
+  it('has agent events migration', () => {
+    const sql = fs.readFileSync(
+      path.join(__dirname, '../../migrations/005_agent_events.sql'),
+      'utf8'
+    );
+    assert.match(sql, /project_agent_events/);
+    assert.match(sql, /stop_reason/);
   });
 });

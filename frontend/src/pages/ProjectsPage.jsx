@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import { checkpointOf, stageLabel } from '../lib/projectStage';
+import { checkpointOf, stageLabel, stopLabel } from '../lib/projectStage';
 
 function ProgressBar({ value, live }) {
   const pct = Math.max(0, Math.min(100, Number(value) || 0));
@@ -153,11 +153,12 @@ export default function ProjectsPage() {
             {(() => {
               const cp = checkpointOf(p);
               const stage = cp.stage || (p.status === 'running' ? 'queued' : null);
-              if (!stage && !cp.detail && !cp.last_error) return null;
+              if (!stage && !cp.detail && !p.last_error && !p.stop_reason) return null;
+              const bad = stage === 'error' || stage === 'blocked' || p.stop_reason || p.last_error;
               return (
                 <div
                   className={`mt-2 rounded-lg px-2.5 py-2 text-xs ${
-                    stage === 'error' || stage === 'blocked' || cp.last_error
+                    bad
                       ? 'bg-red-50 text-danger'
                       : p.status === 'running'
                         ? 'bg-blue-50 text-primary'
@@ -165,11 +166,16 @@ export default function ProjectsPage() {
                   }`}
                 >
                   <div className="font-semibold">
-                    {stage ? stageLabel(stage) : 'Status'}
+                    {p.stop_reason
+                      ? stopLabel(p.stop_reason)
+                      : stage
+                        ? stageLabel(stage)
+                        : 'Status'}
                     {cp.mode ? ` · ${cp.mode}` : ''}
+                    {p.agent_iteration ? ` · iter ${p.agent_iteration}` : ''}
                   </div>
                   <div className="line-clamp-2 mt-0.5 opacity-90">
-                    {cp.last_error || cp.detail || cp.last_summary || 'Waiting for worker…'}
+                    {p.last_error || cp.last_error || cp.detail || cp.last_summary || 'Waiting for worker…'}
                   </div>
                 </div>
               );
