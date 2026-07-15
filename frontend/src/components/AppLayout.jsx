@@ -133,7 +133,7 @@ export default function AppLayout({ user, onLogout }) {
         </button>
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-[260px] shrink-0 border-r border-line bg-white px-4 py-5 flex flex-col transition-transform duration-200 lg:static lg:translate-x-0 lg:bg-white/80 lg:backdrop-blur ${
+        className={`fixed inset-y-0 left-0 z-50 w-[260px] shrink-0 border-r border-line bg-white px-4 py-5 flex flex-col transition-transform duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 lg:bg-white/80 lg:backdrop-blur ${
           mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

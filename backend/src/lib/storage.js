@@ -3,10 +3,18 @@ const path = require('path');
 const crypto = require('crypto');
 
 function rootDir() {
-  // Resolve to an absolute, normalized path. A relative STORAGE_PATH (e.g. "./data")
-  // otherwise breaks resolvePath()'s startsWith() containment check, since path.join
-  // normalizes "./data/x" to "data/x" which no longer starts with "./data".
-  const root = path.resolve(process.env.STORAGE_PATH || path.join(process.cwd(), 'data'));
+  const configured = process.env.STORAGE_PATH || 'data';
+  // A relative STORAGE_PATH must resolve to the SAME absolute directory no matter
+  // which process requires this module — backend and worker are separate Node
+  // processes with different cwd (backend/, worker/), so resolving against
+  // process.cwd() silently gave each its own "./data" folder, with backend never
+  // seeing files the worker wrote. Anchor relative paths at the repo root (three
+  // levels up from this file: lib -> src -> backend -> repo root) instead, which
+  // is stable regardless of which process's cwd requires the module. Absolute
+  // paths (e.g. Railway's /var/data) are used as-is, unaffected by this.
+  const root = path.isAbsolute(configured)
+    ? configured
+    : path.resolve(__dirname, '../../..', configured);
   fs.mkdirSync(root, { recursive: true });
   return root;
 }

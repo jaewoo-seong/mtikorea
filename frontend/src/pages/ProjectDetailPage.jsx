@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useToast } from '../components/Toast';
+import DocumentPreview from '../components/DocumentPreview';
 import {
   PIPELINE,
   buildDiagnostics,
@@ -134,6 +135,16 @@ export default function ProjectDetailPage() {
   const [eventSearch, setEventSearch] = useState('');
   const [expandedEvent, setExpandedEvent] = useState(null);
   const [collapsedCycles, setCollapsedCycles] = useState(() => new Set());
+  const [expandedDocIds, setExpandedDocIds] = useState(() => new Set());
+
+  function toggleDocPreview(docId) {
+    setExpandedDocIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(docId)) next.delete(docId);
+      else next.add(docId);
+      return next;
+    });
+  }
 
   async function load() {
     const d = await api.projects.get(id);
@@ -818,9 +829,14 @@ export default function ProjectDetailPage() {
 
         <div className="space-y-4 min-w-0">
           <div className="card p-5 min-w-0">
-            <h2 className="font-semibold mb-1">Pending approval (hidden staging)</h2>
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+              <h2 className="font-semibold">Pending approval (hidden staging)</h2>
+              <Link to={`/documents?projectId=${id}`} className="text-xs text-primary hover:underline shrink-0">
+                All documents →
+              </Link>
+            </div>
             <p className="text-xs text-muted mb-3">Agent outputs stay here until you approve → Shared docs.</p>
-            <div className="space-y-2 max-h-56 overflow-y-auto">
+            <div className="space-y-2 max-h-[28rem] overflow-y-auto">
               {stagedDocuments.map((d) => (
                 <div key={d.id} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
                   <div className="text-sm font-medium">{d.title}</div>
@@ -840,9 +856,20 @@ export default function ProjectDetailPage() {
                     >
                       <IconX width={12} height={12} /> Reject
                     </button>
-                    <a className="btn-ghost text-xs py-1" href={`/api/documents/${d.id}/download`}>Preview</a>
+                    <button
+                      type="button"
+                      className="btn-ghost text-xs py-1"
+                      onClick={() => toggleDocPreview(d.id)}
+                    >
+                      {expandedDocIds.has(d.id) ? 'Hide preview' : 'Preview'}
+                    </button>
                     <a className="btn-ghost text-xs py-1" href={`/api/documents/${d.id}/export/docx`} download>Export Word</a>
                   </div>
+                  {expandedDocIds.has(d.id) && (
+                    <div className="pt-2 mt-2 border-t border-amber-200/60">
+                      <DocumentPreview documentId={d.id} />
+                    </div>
+                  )}
                 </div>
               ))}
               {!stagedDocuments.length && <p className="text-sm text-muted">No staged outputs yet</p>}
@@ -851,20 +878,42 @@ export default function ProjectDetailPage() {
 
           <div className="card p-5 min-w-0">
             <h2 className="font-semibold mb-3">Approved on this project</h2>
-            <div className="space-y-2 max-h-40 overflow-y-auto">
+            <div className="space-y-2 max-h-[28rem] overflow-y-auto">
               {documents.map((d) => (
                 <div key={d.id} className="rounded-lg border border-line px-3 py-2 hover:bg-slate-50 text-sm">
-                  <a href={`/api/documents/${d.id}/download`} className="block">
-                    <div className="font-medium truncate">{d.title}</div>
-                    <div className="text-xs text-muted">Shared doc ID = title</div>
-                  </a>
-                  <a
-                    className="text-xs text-primary font-medium hover:underline"
-                    href={`/api/documents/${d.id}/export/docx`}
-                    download
-                  >
-                    Export Word
-                  </a>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{d.title}</div>
+                      <div className="text-xs text-muted">Shared doc ID = title</div>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-xs text-primary font-medium hover:underline shrink-0"
+                      onClick={() => toggleDocPreview(d.id)}
+                    >
+                      {expandedDocIds.has(d.id) ? 'Hide' : 'Preview'}
+                    </button>
+                  </div>
+                  <div className="flex gap-3 mt-1">
+                    <a
+                      className="text-xs text-primary font-medium hover:underline"
+                      href={`/api/documents/${d.id}/download`}
+                    >
+                      Download
+                    </a>
+                    <a
+                      className="text-xs text-primary font-medium hover:underline"
+                      href={`/api/documents/${d.id}/export/docx`}
+                      download
+                    >
+                      Export Word
+                    </a>
+                  </div>
+                  {expandedDocIds.has(d.id) && (
+                    <div className="pt-2 mt-2 border-t border-line">
+                      <DocumentPreview documentId={d.id} />
+                    </div>
+                  )}
                 </div>
               ))}
               {!documents.length && <p className="text-sm text-muted">Approve staged docs to publish here + Shared docs</p>}
