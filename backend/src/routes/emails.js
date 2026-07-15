@@ -9,6 +9,7 @@ const {
   getSharedAccount,
   modifyLabels,
   folderCounts,
+  probeGmail,
 } = require('../services/gmailService');
 const { readFile, saveBuffer } = require('../lib/storage');
 const { organizeFilesToClient } = require('../services/organizeAgent');
@@ -20,10 +21,14 @@ router.get('/status', async (req, res, next) => {
   try {
     const account = await getSharedAccount(req.user.org_id);
     const counts = await folderCounts(req.user.org_id);
+    const probe = await probeGmail(req.user.org_id);
     res.json({
-      connected: Boolean(account?.refresh_token || process.env.GMAIL_REFRESH_TOKEN),
-      email: account?.email || process.env.GMAIL_USER || null,
+      connected: probe.connected,
+      needsReconnect: probe.needsReconnect,
+      reason: probe.reason || null,
+      email: probe.email || account?.email || process.env.GMAIL_USER || null,
       shared: true,
+      reconnectUrl: '/auth/google',
       counts,
     });
   } catch (err) {

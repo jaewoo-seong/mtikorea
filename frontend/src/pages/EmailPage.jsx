@@ -204,7 +204,11 @@ export default function EmailPage() {
         <div className="min-w-0">
           <div className="font-semibold text-sm">{listTitle}</div>
           <div className="text-xs text-muted truncate">
-            {status?.connected ? status.email : 'Gmail not connected'}
+            {status?.connected
+              ? status.email
+              : status?.needsReconnect
+                ? 'Gmail token expired — reconnect required'
+                : 'Gmail not connected'}
           </div>
         </div>
         <div className="flex-1 max-w-xl mx-auto">
@@ -218,6 +222,11 @@ export default function EmailPage() {
             }}
           />
         </div>
+        {(status?.needsReconnect || !status?.connected) && (
+          <a className="btn-secondary" href="/auth/google">
+            Reconnect Gmail
+          </a>
+        )}
         <button type="button" className="btn-secondary" disabled={syncing} onClick={syncAll}>
           {syncing ? 'Syncing…' : 'Sync'}
         </button>
@@ -226,10 +235,20 @@ export default function EmailPage() {
         </button>
       </div>
 
+      {status?.needsReconnect && (
+        <div className="px-4 py-2 text-xs bg-amber-50 text-amber-900 border-b border-amber-100 flex flex-wrap items-center justify-between gap-2">
+          <span>
+            <strong>invalid_grant</strong> — refresh token dead or from another Google OAuth client.
+            Remove Railway <code>GMAIL_REFRESH_TOKEN</code>, then click Reconnect Gmail (allow consent).
+          </span>
+          <a className="underline font-medium" href="/auth/google">Reconnect now</a>
+        </div>
+      )}
+
       {msg && (
-        <div className="px-4 py-2 text-xs bg-blue-50 text-primary border-b border-blue-100 flex justify-between">
-          <span>{msg}</span>
-          <button type="button" className="underline" onClick={() => setMsg('')}>
+        <div className="px-4 py-2 text-xs bg-blue-50 text-primary border-b border-blue-100 flex justify-between gap-3">
+          <span className="min-w-0 break-words">{msg}</span>
+          <button type="button" className="underline shrink-0" onClick={() => setMsg('')}>
             dismiss
           </button>
         </div>

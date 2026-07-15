@@ -1,6 +1,6 @@
 const FALLBACK_MAIN = 'anthropic/claude-haiku-4.5';
 const FALLBACK_SUBS =
-  'meta-llama/llama-3.3-70b-instruct:free,google/gemma-3-27b-it:free,mistralai/mistral-small-3.1-24b-instruct:free';
+  'meta-llama/llama-3.3-70b-instruct:free,google/gemma-4-31b-it:free,meta-llama/llama-3.2-3b-instruct:free';
 
 function getMainModel() {
   return (

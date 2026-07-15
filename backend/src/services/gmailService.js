@@ -32,20 +32,40 @@ function clientFromTokens(refreshToken, accessToken) {
   return oauth2;
 }
 
+function isInvalidGrant(err) {
+  const code = err?.response?.data?.error || err?.code || '';
+  const msg = err?.response?.data?.error_description || err?.message || '';
+  return String(code).includes('invalid_grant') || String(msg).includes('invalid_grant');
+}
+
+function wrapGmailAuthError(err) {
+  if (!isInvalidGrant(err)) return err;
+  return Object.assign(
+    new Error(
+      'invalid_grant — Gmail refresh token is expired/revoked or from a different OAuth client. ' +
+        'Delete Railway GMAIL_REFRESH_TOKEN (if set), then open /auth/google and sign in again with consent.'
+    ),
+    { status: 401, code: 'invalid_grant', cause: err }
+  );
+}
+
 async function getSharedAccount(orgId) {
-  if (process.env.GMAIL_REFRESH_TOKEN && process.env.GMAIL_USER) {
-    return {
-      email: process.env.GMAIL_USER,
-      refresh_token: process.env.GMAIL_REFRESH_TOKEN,
-      access_token: null,
-      org_id: orgId,
-    };
-  }
+  // Prefer DB token (from last Google login). Env token is often stale after client rotation.
   const { rows } = await query(
     `SELECT * FROM email_accounts WHERE org_id = $1 AND is_shared = true ORDER BY created_at DESC LIMIT 1`,
     [orgId]
   );
-  return rows[0] || null;
+  if (rows[0]?.refresh_token) return rows[0];
+
+  if (trimEnv('GMAIL_REFRESH_TOKEN') && trimEnv('GMAIL_USER')) {
+    return {
+      email: trimEnv('GMAIL_USER'),
+      refresh_token: trimEnv('GMAIL_REFRESH_TOKEN'),
+      access_token: null,
+      org_id: orgId,
+    };
+  }
+  return null;
 }
 
 async function gmailClient(orgId) {
@@ -53,6 +73,31 @@ async function gmailClient(orgId) {
   if (!account?.refresh_token) return null;
   const auth = clientFromTokens(account.refresh_token, account.access_token);
   return { gmail: google.gmail({ version: 'v1', auth }), account };
+}
+
+async function probeGmail(orgId) {
+  const pair = await gmailClient(orgId);
+  if (!pair) {
+    return { connected: false, needsReconnect: true, reason: 'no_token' };
+  }
+  try {
+    const profile = await pair.gmail.users.getProfile({ userId: 'me' });
+    return {
+      connected: true,
+      needsReconnect: false,
+      email: profile.data.emailAddress || pair.account.email,
+    };
+  } catch (err) {
+    if (isInvalidGrant(err)) {
+      return {
+        connected: false,
+        needsReconnect: true,
+        reason: 'invalid_grant',
+        email: pair.account.email || null,
+      };
+    }
+    throw wrapGmailAuthError(err);
+  }
 }
 
 async function findClientByAddress(orgId, address) {
@@ -212,41 +257,49 @@ async function upsertMessage(orgId, full, fallbackFolder) {
 }
 
 async function syncFolder(orgId, folder, { max = 50, search = '' } = {}) {
-  const pair = await gmailClient(orgId);
-  if (!pair) return { synced: 0, reason: 'no_gmail_account' };
-  const { gmail } = pair;
-  const base = FOLDER_QUERIES[folder] || FOLDER_QUERIES.inbox;
-  const q = search ? `${base} ${search}`.trim() : base;
-  const list = await gmail.users.messages.list({
-    userId: 'me',
-    maxResults: Math.min(max, 100),
-    q,
-  });
-  const messages = list.data.messages || [];
-  let synced = 0;
-  for (const m of messages) {
-    const full = await gmail.users.messages.get({
+  try {
+    const pair = await gmailClient(orgId);
+    if (!pair) return { synced: 0, reason: 'no_gmail_account' };
+    const { gmail } = pair;
+    const base = FOLDER_QUERIES[folder] || FOLDER_QUERIES.inbox;
+    const q = search ? `${base} ${search}`.trim() : base;
+    const list = await gmail.users.messages.list({
       userId: 'me',
-      id: m.id,
-      format: 'full',
+      maxResults: Math.min(max, 100),
+      q,
     });
-    await upsertMessage(orgId, full, folder);
-    synced += 1;
+    const messages = list.data.messages || [];
+    let synced = 0;
+    for (const m of messages) {
+      const full = await gmail.users.messages.get({
+        userId: 'me',
+        id: m.id,
+        format: 'full',
+      });
+      await upsertMessage(orgId, full, folder);
+      synced += 1;
+    }
+    return { synced, folder, query: q };
+  } catch (err) {
+    throw wrapGmailAuthError(err);
   }
-  return { synced, folder, query: q };
 }
 
 async function syncMailbox(orgId, { folders = ['inbox', 'spam', 'sent', 'trash', 'drafts', 'starred'], max = 40 } = {}) {
-  const pair = await gmailClient(orgId);
-  if (!pair) return { synced: 0, reason: 'no_gmail_account', byFolder: {} };
-  const byFolder = {};
-  let total = 0;
-  for (const folder of folders) {
-    const r = await syncFolder(orgId, folder, { max });
-    byFolder[folder] = r.synced;
-    total += r.synced;
+  try {
+    const pair = await gmailClient(orgId);
+    if (!pair) return { synced: 0, reason: 'no_gmail_account', byFolder: {} };
+    const byFolder = {};
+    let total = 0;
+    for (const folder of folders) {
+      const r = await syncFolder(orgId, folder, { max });
+      byFolder[folder] = r.synced;
+      total += r.synced;
+    }
+    return { synced: total, byFolder };
+  } catch (err) {
+    throw wrapGmailAuthError(err);
   }
-  return { synced: total, byFolder };
 }
 
 function encodeRawMime({ from, to, cc, bcc, subject, html, text, inReplyTo, references }) {
@@ -294,30 +347,34 @@ function escapeHtml(s) {
 }
 
 async function sendMessage(orgId, { to, cc, bcc, subject, html, text, threadId }) {
-  const pair = await gmailClient(orgId);
-  if (!pair) throw Object.assign(new Error('Gmail not connected'), { status: 503 });
-  const { gmail, account } = pair;
-  const raw = encodeRawMime({
-    from: account.email,
-    to,
-    cc,
-    bcc,
-    subject,
-    html,
-    text,
-  });
-  const res = await gmail.users.messages.send({
-    userId: 'me',
-    requestBody: {
-      raw,
-      threadId: threadId || undefined,
-    },
-  });
-  if (res.data?.id) {
-    const full = await gmail.users.messages.get({ userId: 'me', id: res.data.id, format: 'full' });
-    await upsertMessage(orgId, full, 'sent');
+  try {
+    const pair = await gmailClient(orgId);
+    if (!pair) throw Object.assign(new Error('Gmail not connected'), { status: 503 });
+    const { gmail, account } = pair;
+    const raw = encodeRawMime({
+      from: account.email,
+      to,
+      cc,
+      bcc,
+      subject,
+      html,
+      text,
+    });
+    const res = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw,
+        threadId: threadId || undefined,
+      },
+    });
+    if (res.data?.id) {
+      const full = await gmail.users.messages.get({ userId: 'me', id: res.data.id, format: 'full' });
+      await upsertMessage(orgId, full, 'sent');
+    }
+    return res.data;
+  } catch (err) {
+    throw wrapGmailAuthError(err);
   }
-  return res.data;
 }
 
 async function sendReply(orgId, { to, cc, subject, html, text, body, threadId }) {
@@ -332,19 +389,23 @@ async function sendReply(orgId, { to, cc, subject, html, text, body, threadId })
 }
 
 async function modifyLabels(orgId, gmailMessageId, { add = [], remove = [] }) {
-  const pair = await gmailClient(orgId);
-  if (!pair) throw Object.assign(new Error('Gmail not connected'), { status: 503 });
-  const { gmail } = pair;
-  await gmail.users.messages.modify({
-    userId: 'me',
-    id: gmailMessageId,
-    requestBody: {
-      addLabelIds: add,
-      removeLabelIds: remove,
-    },
-  });
-  const full = await gmail.users.messages.get({ userId: 'me', id: gmailMessageId, format: 'full' });
-  return upsertMessage(orgId, full);
+  try {
+    const pair = await gmailClient(orgId);
+    if (!pair) throw Object.assign(new Error('Gmail not connected'), { status: 503 });
+    const { gmail } = pair;
+    await gmail.users.messages.modify({
+      userId: 'me',
+      id: gmailMessageId,
+      requestBody: {
+        addLabelIds: add,
+        removeLabelIds: remove,
+      },
+    });
+    const full = await gmail.users.messages.get({ userId: 'me', id: gmailMessageId, format: 'full' });
+    return upsertMessage(orgId, full);
+  } catch (err) {
+    throw wrapGmailAuthError(err);
+  }
 }
 
 async function folderCounts(orgId) {
@@ -370,5 +431,7 @@ module.exports = {
   modifyLabels,
   findClientByAddress,
   folderCounts,
+  probeGmail,
+  isInvalidGrant,
   FOLDER_QUERIES,
 };

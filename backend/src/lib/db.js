@@ -12,6 +12,9 @@ function getPool() {
       connectionString,
       ssl: process.env.DATABASE_SSL === 'false' ? false : undefined,
     });
+    pool.on('error', (err) => {
+      console.error('[db] idle pool error (will reconnect):', err.message);
+    });
   }
   return pool;
 }
