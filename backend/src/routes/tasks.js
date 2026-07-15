@@ -154,4 +154,75 @@ router.delete('/:id', async (req, res, next) => {
   }
 });
 
+router.get('/:id/comments', async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT tc.*, COALESCE(u.name, u.email) AS author_name
+       FROM task_comments tc
+       LEFT JOIN users u ON u.id = tc.author_id
+       WHERE tc.task_id = $1 AND tc.org_id = $2
+       ORDER BY tc.created_at ASC`,
+      [req.params.id, req.user.org_id]
+    );
+    res.json({ comments: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/comments', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const { body } = req.body || {};
+    if (!body || !body.trim()) return res.status(400).json({ error: 'body required' });
+    const { rows } = await query(
+      `INSERT INTO task_comments (task_id, org_id, author_id, body)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.params.id, req.user.org_id, req.user.id, body.trim()]
+    );
+    const author = await query('SELECT COALESCE(name, email) AS author_name FROM users WHERE id = $1', [
+      req.user.id,
+    ]);
+    res.status(201).json({ comment: { ...rows[0], author_name: author.rows[0]?.author_name || null } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/approve', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const { rows } = await query(
+      `UPDATE shared_tasks SET status = 'done', updated_at = now()
+       WHERE id = $1 AND org_id = $2 RETURNING *`,
+      [req.params.id, req.user.org_id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    res.json({ task: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/reject', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const { note } = req.body || {};
+    const { rows } = await query(
+      `UPDATE shared_tasks SET status = 'open', feedback_notes = $3, updated_at = now()
+       WHERE id = $1 AND org_id = $2 RETURNING *`,
+      [req.params.id, req.user.org_id, note || null]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    await query(
+      `INSERT INTO task_comments (task_id, org_id, author_id, body)
+       VALUES ($1, $2, $3, $4)`,
+      [req.params.id, req.user.org_id, req.user.id, `Rejected: ${note || '(no note provided)'}`]
+    );
+    res.json({ task: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import DocumentPreview from '../components/DocumentPreview';
 
 export default function DocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -12,6 +13,16 @@ export default function DocumentsPage() {
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
   const [msg, setMsg] = useState('');
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+
+  function togglePreview(docId) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(docId)) next.delete(docId);
+      else next.add(docId);
+      return next;
+    });
+  }
 
   async function load() {
     const [d, c, p] = await Promise.all([
@@ -140,10 +151,24 @@ export default function DocumentsPage() {
             </div>
             <div className="mt-auto flex items-center justify-between text-xs text-muted pt-2 border-t border-line">
               <span>{d.uploader_name || 'System'}</span>
-              <a className="text-primary font-medium hover:underline" href={`/api/documents/${d.id}/download`}>
-                Download
-              </a>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="text-primary font-medium hover:underline"
+                  onClick={() => togglePreview(d.id)}
+                >
+                  {expandedIds.has(d.id) ? 'Hide preview' : 'Preview'}
+                </button>
+                <a className="text-primary font-medium hover:underline" href={`/api/documents/${d.id}/download`}>
+                  Download
+                </a>
+              </div>
             </div>
+            {expandedIds.has(d.id) && (
+              <div className="pt-2 border-t border-line">
+                <DocumentPreview documentId={d.id} />
+              </div>
+            )}
           </article>
         ))}
       </div>

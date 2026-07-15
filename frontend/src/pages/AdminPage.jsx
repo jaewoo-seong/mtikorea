@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 
 export default function AdminPage({ user }) {
   const [users, setUsers] = useState([]);
-  const [invite, setInvite] = useState({ email: '', name: '', role: 'member' });
+  const [newAccount, setNewAccount] = useState({ username: '', password: '', name: '' });
   const [msg, setMsg] = useState('');
 
   if (user.role !== 'admin') return <Navigate to="/clients" replace />;
@@ -23,33 +23,36 @@ export default function AdminPage({ user }) {
     await load();
   }
 
-  async function sendInvite(e) {
+  async function createAccount(e) {
     e.preventDefault();
-    const r = await api.admin.invite(invite);
-    setMsg(r.note || 'Invited');
-    setInvite({ email: '', name: '', role: 'member' });
-    await load();
+    setMsg('');
+    try {
+      await api.admin.createAccount(newAccount);
+      setMsg(`Account "${newAccount.username}" created`);
+      setNewAccount({ username: '', password: '', name: '' });
+      await load();
+    } catch (err) {
+      setMsg(err.message);
+    }
   }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-3xl font-semibold">Admin</h1>
-        <p className="text-sm text-muted mt-1">User access and roles (Google OAuth sign-in)</p>
+        <p className="text-sm text-muted mt-1">Create and manage local staff accounts</p>
       </div>
 
-      <form onSubmit={sendInvite} className="card p-4 grid md:grid-cols-4 gap-3">
-        <input className="input" required type="email" placeholder="email@company.com"
-          value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} />
-        <input className="input" placeholder="Name" value={invite.name}
-          onChange={(e) => setInvite({ ...invite, name: e.target.value })} />
-        <select className="input" value={invite.role}
-          onChange={(e) => setInvite({ ...invite, role: e.target.value })}>
-          <option value="admin">admin</option>
-          <option value="member">member</option>
-          <option value="viewer">viewer</option>
-        </select>
-        <button className="btn-primary" type="submit">Invite user</button>
+      <form onSubmit={createAccount} className="card p-4 grid md:grid-cols-4 gap-3">
+        <input className="input" required placeholder="Username"
+          value={newAccount.username}
+          onChange={(e) => setNewAccount({ ...newAccount, username: e.target.value })} />
+        <input className="input" required type="password" placeholder="Password (min 8 chars)"
+          value={newAccount.password}
+          onChange={(e) => setNewAccount({ ...newAccount, password: e.target.value })} />
+        <input className="input" placeholder="Display name" value={newAccount.name}
+          onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })} />
+        <button className="btn-primary" type="submit">Create account</button>
       </form>
 
       {msg && <p className="text-sm text-muted">{msg}</p>}
@@ -71,15 +74,9 @@ export default function AdminPage({ user }) {
                   <div className="text-muted text-xs">{u.email}</div>
                 </td>
                 <td className="px-4 py-3">
-                  <select
-                    className="input w-32"
-                    value={u.role}
-                    onChange={(e) => updateUser(u.id, { role: e.target.value })}
-                  >
-                    <option value="admin">admin</option>
-                    <option value="member">member</option>
-                    <option value="viewer">viewer</option>
-                  </select>
+                  <span className="inline-block rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-muted">
+                    {u.role}
+                  </span>
                 </td>
                 <td className="px-4 py-3">
                   <button

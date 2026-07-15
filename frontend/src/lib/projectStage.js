@@ -13,6 +13,8 @@ export const PIPELINE = [
   { id: 'done', label: 'Done' },
 ];
 
+// 'idle' deliberately excluded: it's the "nothing happened yet / between cycles" fallback,
+// not a position after 'saving' — including it made the stepper mark every step done pre-start.
 const ORDER = [
   'queued',
   'planning',
@@ -20,7 +22,6 @@ const ORDER = [
   'synthesis',
   'review',
   'saving',
-  'idle',
   'done',
 ];
 
@@ -50,6 +51,27 @@ export function checkpointOf(project) {
 
 export function stageLabel(stage) {
   return PIPELINE.find((p) => p.id === stage)?.label || (stage ? String(stage) : 'Unknown');
+}
+
+/** Single source of truth for stage → color/icon tone across list + detail views. */
+export function stageTone(stage) {
+  if (stage === 'error' || stage === 'blocked') return 'error';
+  if (stage === 'waiting_retry') return 'warn';
+  if (stage === 'done') return 'success';
+  if (stage === 'idle' || stage === 'queued' || !stage) return 'idle';
+  return 'active';
+}
+
+const TONE_CLASSES = {
+  active: { badge: 'bg-blue-100 text-primary', bar: 'bg-primary', dot: 'bg-primary', borderL: 'border-l-primary' },
+  success: { badge: 'bg-emerald-100 text-success', bar: 'bg-success', dot: 'bg-success', borderL: 'border-l-success' },
+  error: { badge: 'bg-red-100 text-danger', bar: 'bg-danger', dot: 'bg-danger', borderL: 'border-l-danger' },
+  warn: { badge: 'bg-amber-100 text-amber-700', bar: 'bg-amber-500', dot: 'bg-amber-500', borderL: 'border-l-amber-500' },
+  idle: { badge: 'bg-slate-100 text-muted', bar: 'bg-slate-400', dot: 'bg-slate-400', borderL: 'border-l-slate-300' },
+};
+
+export function toneClasses(tone) {
+  return TONE_CLASSES[tone] || TONE_CLASSES.idle;
 }
 
 export function pipelineIndex(stage) {
@@ -88,7 +110,21 @@ export function buildDiagnostics(project, logs = [], errors = [], events = []) {
     tips.push({ level: 'warn', text: 'Paused — Start again to resume the continuous loop.' });
   }
   if (status === 'running') {
-    if (!events.length && !logs.length && !cp.stage) {
+    const waitingClaim =
+      !project.claimed_by &&
+      (cp.detail || '').toLowerCase().includes('waiting for worker');
+    const staleStart =
+      project.started_at &&
+      (Date.now() - new Date(project.started_at).getTime()) > 20_000 &&
+      !events.some((e) => e.stage !== 'control' || e.action !== 'start');
+
+    if (waitingClaim || (staleStart && !events.length)) {
+      tips.push({
+        level: 'error',
+        text:
+          'No Worker has claimed this project. On Railway: add a second service from railway.worker.json, same DATABASE_URL as API, redeploy, check Worker logs for “[Worker] claimed …”. Local: run `npm run start:worker` in a separate terminal (keep it alive).',
+      });
+    } else if (!events.length && !logs.length && !cp.stage) {
       tips.push({
         level: 'warn',
         text: 'Running but no events yet. Is the Worker service up with the same DATABASE_URL?',

@@ -1,6 +1,25 @@
+const crypto = require('crypto');
 const { query } = require('./db');
 
 const ALLOWED_ROLES = ['admin', 'member', 'viewer'];
+
+const SCRYPT_KEYLEN = 64;
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), salt, SCRYPT_KEYLEN).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored || typeof stored !== 'string' || !stored.includes(':')) return false;
+  const [salt, hashHex] = stored.split(':');
+  if (!salt || !hashHex) return false;
+  const hash = crypto.scryptSync(String(password), salt, SCRYPT_KEYLEN);
+  const storedBuf = Buffer.from(hashHex, 'hex');
+  if (storedBuf.length !== hash.length) return false;
+  return crypto.timingSafeEqual(hash, storedBuf);
+}
 
 function parseDomains() {
   return (process.env.ALLOWED_EMAIL_DOMAINS || '')
@@ -67,6 +86,18 @@ async function upsertDevUser() {
   return rows[0];
 }
 
+async function createLocalAccount({ username, password, name }) {
+  const org = await ensureDefaultOrg();
+  const passwordHash = hashPassword(password);
+  const syntheticEmail = `${String(username).toLowerCase()}@local.invalid`;
+  const { rows } = await query(
+    `INSERT INTO users (org_id, email, name, role, oauth_provider, username, password_hash)
+     VALUES ($1, $2, $3, 'member', 'local', $4, $5) RETURNING *`,
+    [org.id, syntheticEmail, name || username, username, passwordHash]
+  );
+  return rows[0];
+}
+
 function requireAuth(req, res, next) {
   if (!req.session?.userId || !req.user) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -123,6 +154,9 @@ module.exports = {
   ensureDefaultOrg,
   upsertGoogleUser,
   upsertDevUser,
+  hashPassword,
+  verifyPassword,
+  createLocalAccount,
   requireAuth,
   requireRole,
   loadUser,

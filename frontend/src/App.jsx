@@ -11,6 +11,7 @@ import ProjectDetailPage from './pages/ProjectDetailPage';
 import DocumentsPage from './pages/DocumentsPage';
 import TasksPage from './pages/TasksPage';
 import AdminPage from './pages/AdminPage';
+import SettingsPage from './pages/SettingsPage';
 
 export default function App() {
   const [user, setUser] = useState(undefined);
@@ -20,6 +21,13 @@ export default function App() {
       .me()
       .then((d) => setUser(d.user))
       .catch(() => setUser(null));
+  }, []);
+
+  // Any API call that 401s mid-session drops us back to the login screen.
+  useEffect(() => {
+    const onUnauthorized = () => setUser(null);
+    window.addEventListener('auth:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', onUnauthorized);
   }, []);
 
   if (user === undefined) {
@@ -50,6 +58,7 @@ export default function App() {
         <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/admin" element={<AdminPage user={user} />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/clients" replace />} />
     </Routes>

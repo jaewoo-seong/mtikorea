@@ -17,6 +17,11 @@ async function request(path, options = {}) {
     data = { raw: text };
   }
   if (!res.ok) {
+    // Session expired / not authenticated mid-session: let the app bounce to login.
+    // Skip the auth probe/login endpoints themselves so we don't loop on the login screen.
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+    }
     const err = new Error(data?.error || res.statusText);
     err.status = res.status;
     err.data = data;
@@ -33,6 +38,11 @@ export const api = {
     request('/auth/dev-login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+    }),
+  login: (username, password) =>
+    request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
     }),
   bootstrap: () => request('/api/bootstrap'),
 
@@ -132,13 +142,26 @@ export const api = {
     create: (body) => request('/api/tasks', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) =>
       request(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    delete: (id) => request(`/api/tasks/${id}`, { method: 'DELETE' }),
+    approve: (id) => request(`/api/tasks/${id}/approve`, { method: 'POST', body: '{}' }),
+    reject: (id, note) =>
+      request(`/api/tasks/${id}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
+    comments: {
+      list: (taskId) => request(`/api/tasks/${taskId}/comments`),
+      add: (taskId, body) =>
+        request(`/api/tasks/${taskId}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
+    },
   },
 
   admin: {
     users: () => request('/api/admin/users'),
     updateUser: (id, body) =>
       request(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-    invite: (body) =>
-      request('/api/admin/users/invite', { method: 'POST', body: JSON.stringify(body) }),
+    createAccount: (body) =>
+      request('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
+  },
+
+  settings: {
+    stats: () => request('/api/settings/stats'),
   },
 };

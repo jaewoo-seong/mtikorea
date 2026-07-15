@@ -1,26 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../lib/api';
 
 export default function LoginPage({ onLogin }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [authFlags, setAuthFlags] = useState({ enabled: false, googleEnabled: false });
-  const [email, setEmail] = useState('admin@mti.local');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  useEffect(() => {
-    api
-      .devLoginStatus()
-      .then(setAuthFlags)
-      .catch(() => setAuthFlags({ enabled: false, googleEnabled: false }));
-  }, []);
-
-  async function onDevSubmit(e) {
+  async function onSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      const data = await api.devLogin(email, password);
+      const data = await api.login(username, password);
       onLogin(data.user);
     } catch (err) {
       setError(err.message);
@@ -37,48 +29,29 @@ export default function LoginPage({ onLogin }) {
           Email + client CRM with project agents that keep working after you close the browser.
         </p>
 
-        <div className="mt-8 flex flex-col gap-6">
-          {authFlags.googleEnabled && (
-            <a className="btn-primary w-full" href="/auth/google">
-              Continue with Google
-            </a>
-          )}
-
-          {authFlags.enabled && (
-            <form onSubmit={onDevSubmit} className="space-y-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted">
-                Developer pass (no Google)
-              </div>
-              <input
-                className="input"
-                type="email"
-                autoComplete="username"
-                placeholder="admin@mti.local"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-              <input
-                className="input"
-                type="password"
-                autoComplete="current-password"
-                placeholder="Developer password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-              <button type="submit" className="btn-secondary w-full" disabled={loading}>
-                {loading ? 'Signing in…' : 'Sign in with developer pass'}
-              </button>
-            </form>
-          )}
-
-          {!authFlags.enabled && !authFlags.googleEnabled && (
-            <p className="text-sm text-danger">
-              No auth configured. Set DEV_AUTH_EMAIL + DEV_AUTH_PASSWORD (or Google OAuth keys).
-            </p>
-          )}
-        </div>
+        <form onSubmit={onSubmit} className="mt-8 space-y-3">
+          <input
+            className="input"
+            type="text"
+            autoComplete="username"
+            placeholder="Username or email"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+          />
+          <input
+            className="input"
+            type="password"
+            autoComplete="current-password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <button type="submit" className="btn-primary w-full" disabled={loading}>
+            {loading ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
 
         {error && <p className="text-danger text-sm mt-4">{error}</p>}
       </div>

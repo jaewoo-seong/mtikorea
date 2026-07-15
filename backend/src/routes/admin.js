@@ -1,6 +1,8 @@
 const express = require('express');
 const { query } = require('../lib/db');
-const { requireRole, ALLOWED_ROLES } = require('../lib/auth');
+const { requireRole, ALLOWED_ROLES, createLocalAccount } = require('../lib/auth');
+
+const USERNAME_RE = /^[a-zA-Z0-9_-]+$/;
 
 const router = express.Router();
 router.use(requireRole('admin'));
@@ -62,6 +64,28 @@ router.post('/users/invite', async (req, res, next) => {
     );
     res.status(201).json({ user: rows[0], note: 'User can sign in via Google OAuth with this email' });
   } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/users', async (req, res, next) => {
+  try {
+    const { username, password, name } = req.body || {};
+    if (!username || !USERNAME_RE.test(username)) {
+      return res.status(400).json({
+        error: 'username required (letters, numbers, underscore, dash only, no spaces)',
+      });
+    }
+    if (!password || String(password).length < 8) {
+      return res.status(400).json({ error: 'password required (minimum 8 characters)' });
+    }
+    const created = await createLocalAccount({ username, password, name });
+    const { password_hash, ...user } = created;
+    res.status(201).json({ user });
+  } catch (err) {
+    if (err?.code === '23505') {
+      return res.status(409).json({ error: 'Username already taken' });
+    }
     next(err);
   }
 });

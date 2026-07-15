@@ -3,7 +3,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 function rootDir() {
-  const root = process.env.STORAGE_PATH || path.join(process.cwd(), 'data');
+  // Resolve to an absolute, normalized path. A relative STORAGE_PATH (e.g. "./data")
+  // otherwise breaks resolvePath()'s startsWith() containment check, since path.join
+  // normalizes "./data/x" to "data/x" which no longer starts with "./data".
+  const root = path.resolve(process.env.STORAGE_PATH || path.join(process.cwd(), 'data'));
   fs.mkdirSync(root, { recursive: true });
   return root;
 }

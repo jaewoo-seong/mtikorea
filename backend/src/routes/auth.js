@@ -6,6 +6,7 @@ const {
   upsertDevUser,
   requireAuth,
   emailAllowed,
+  verifyPassword,
 } = require('../lib/auth');
 const { query } = require('../lib/db');
 
@@ -97,20 +98,20 @@ router.get('/google/callback', async (req, res, next) => {
       avatarUrl: data.picture,
       oauthId: data.id,
     });
-    // Shared org mailbox: store refresh token on org email account when present
-    if (tokens.refresh_token) {
+    // Always persist tokens for shared mailbox. New refresh_token replaces stale ones (invalid_grant).
+    if (tokens.refresh_token || tokens.access_token) {
       await query(
         `INSERT INTO email_accounts (org_id, email, provider, access_token, refresh_token, token_expiry, is_shared)
          VALUES ($1, $2, 'gmail', $3, $4, to_timestamp($5), true)
          ON CONFLICT (org_id, email) DO UPDATE SET
-           access_token = EXCLUDED.access_token,
+           access_token = COALESCE(EXCLUDED.access_token, email_accounts.access_token),
            refresh_token = COALESCE(EXCLUDED.refresh_token, email_accounts.refresh_token),
-           token_expiry = EXCLUDED.token_expiry`,
+           token_expiry = COALESCE(EXCLUDED.token_expiry, email_accounts.token_expiry)`,
         [
           user.org_id,
           data.email,
           tokens.access_token || null,
-          tokens.refresh_token,
+          tokens.refresh_token || null,
           tokens.expiry_date ? tokens.expiry_date / 1000 : null,
         ]
       );
@@ -163,6 +164,42 @@ router.post('/dev-login', async (req, res, next) => {
     if (!user) return res.status(503).json({ error: 'Could not create developer user' });
     req.session.userId = user.id;
     req.session.orgId = user.org_id;
+    res.json({ user });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/login', async (req, res, next) => {
+  try {
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    if (!username || !password) {
+      return res.status(400).json({ error: 'username and password required' });
+    }
+
+    const devEmail = process.env.DEV_AUTH_EMAIL;
+    const devPass = process.env.DEV_AUTH_PASSWORD;
+    if (devEmail && devPass && username.toLowerCase() === devEmail.toLowerCase() && password === devPass) {
+      const user = await upsertDevUser();
+      if (!user) return res.status(503).json({ error: 'Could not create developer user' });
+      req.session.userId = user.id;
+      req.session.orgId = user.org_id;
+      return res.json({ user });
+    }
+
+    const { rows } = await query(
+      `SELECT id, org_id, email, name, avatar_url, role, active, username, password_hash
+       FROM users WHERE username = $1 AND password_hash IS NOT NULL AND active = true`,
+      [username]
+    );
+    const candidate = rows[0];
+    if (!candidate || !verifyPassword(password, candidate.password_hash)) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+    req.session.userId = candidate.id;
+    req.session.orgId = candidate.org_id;
+    const { password_hash, ...user } = candidate;
     res.json({ user });
   } catch (err) {
     next(err);

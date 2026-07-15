@@ -8,8 +8,22 @@ import {
   latestEventStage,
   pipelineIndex,
   stageLabel,
+  stageTone,
   stopLabel,
+  toneClasses,
 } from '../lib/projectStage';
+import {
+  IconAlert,
+  IconArrowRight,
+  IconCheck,
+  IconClock,
+  IconLightbulb,
+  IconLoader,
+  IconMessage,
+  IconSearch,
+  IconUsers,
+  IconX,
+} from '../lib/icons';
 
 function ProgressBar({ value, live }) {
   const pct = Math.max(0, Math.min(100, Number(value) || 0));
@@ -31,6 +45,79 @@ function ProgressBar({ value, live }) {
   );
 }
 
+function DeleteButton({ onConfirm, deleting }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  if (armed) {
+    return (
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          className="btn-danger text-xs"
+          disabled={deleting}
+          onClick={onConfirm}
+        >
+          {deleting ? 'Deleting…' : 'Confirm delete'}
+        </button>
+        <button type="button" className="btn-ghost text-xs" onClick={() => setArmed(false)}>
+          Cancel
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button type="button" className="btn-ghost text-danger" onClick={() => setArmed(true)}>
+      Delete
+    </button>
+  );
+}
+
+/** One mini-card per sub-agent role currently running in this cycle's sub_agents stage. */
+function subAgentCards(events, cycle) {
+  const byRole = new Map();
+  for (const e of events) {
+    if (e.stage !== 'sub_agents' || !e.role || e.cycle !== cycle) continue;
+    if (!byRole.has(e.role)) byRole.set(e.role, e); // events are newest-first: first hit per role = latest
+  }
+  return [...byRole.values()];
+}
+
+function SubAgentCard({ e }) {
+  const isErr = e.status === 'error';
+  const isOk = e.status === 'ok';
+  const isRunning = e.status === 'started';
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 text-xs ${
+        isErr ? 'border-red-200 bg-red-50' : isOk ? 'border-emerald-200 bg-emerald-50/60' : 'border-line bg-white'
+      }`}
+    >
+      <div className="flex items-center gap-1.5 font-semibold">
+        {isRunning && <IconLoader width={12} height={12} className="text-primary" />}
+        {isOk && <IconCheck width={12} height={12} className="text-success" />}
+        {isErr && <IconAlert width={12} height={12} className="text-danger" />}
+        <span className="capitalize">{e.role}</span>
+      </div>
+      <div className="font-mono text-[10px] text-muted mt-0.5 truncate">{e.model}</div>
+      <div className="text-muted mt-1">
+        {isRunning ? 'running…' : isOk ? `${e.tokens_used || 0} tok · ${e.duration_ms ?? '—'}ms` : 'failed'}
+      </div>
+    </div>
+  );
+}
+
+const MEMORY_ROWS = [
+  { key: 'now', icon: IconMessage, label: 'Now' },
+  { key: 'last_summary', icon: IconCheck, label: 'Last summary' },
+  { key: 'next_focus', icon: IconArrowRight, label: 'Next focus' },
+  { key: 'last_critique', icon: IconAlert, label: 'Last critique (rethink)' },
+  { key: 'idea_backlog', icon: IconLightbulb, label: 'Idea backlog' },
+];
+
 export default function ProjectDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -41,7 +128,9 @@ export default function ProjectDetailPage() {
   const [chatInput, setChatInput] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [stageFilter, setStageFilter] = useState('all');
+  const [eventSearch, setEventSearch] = useState('');
   const [expandedEvent, setExpandedEvent] = useState(null);
+  const [collapsedCycles, setCollapsedCycles] = useState(() => new Set());
 
   async function load() {
     const d = await api.projects.get(id);
@@ -127,10 +216,6 @@ export default function ProjectDetailPage() {
   }
 
   async function removeProject() {
-    const title = data?.project?.title || 'this project';
-    if (!window.confirm(`Delete "${title}"? Work logs and project files cascade-delete. Shared docs stay (unlink).`)) {
-      return;
-    }
     setDeleting(true);
     try {
       await api.projects.delete(id);
@@ -162,8 +247,41 @@ export default function ProjectDetailPage() {
   const displayPipeline = PIPELINE.filter((s) =>
     ['planning', 'sub_agents', 'synthesis', 'review', 'saving'].includes(s.id)
   );
-  const filteredEvents =
-    stageFilter === 'all' ? events : events.filter((e) => e.stage === stageFilter);
+  const currentCycle = events[0]?.cycle ?? cp.cycle ?? 0;
+  const subCards = subAgentCards(events, currentCycle);
+  const headerToneClasses = toneClasses(stageTone(activeStage));
+
+  const q = eventSearch.trim().toLowerCase();
+  const filteredEvents = events.filter((e) => {
+    if (stageFilter !== 'all' && e.stage !== stageFilter) return false;
+    if (q) {
+      const hay = `${e.summary || ''} ${e.detail || ''} ${e.action || ''} ${e.role || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const eventGroups = [];
+  const cycleOccurrence = new Map();
+  for (const e of filteredEvents) {
+    const last = eventGroups[eventGroups.length - 1];
+    if (last && last.cycle === e.cycle) {
+      last.items.push(e);
+      continue;
+    }
+    // Same cycle number can recur in non-adjacent stretches (e.g. control events); disambiguate
+    // with an occurrence count so group ids stay stable and unique across renders.
+    const occurrence = cycleOccurrence.get(e.cycle) || 0;
+    cycleOccurrence.set(e.cycle, occurrence + 1);
+    eventGroups.push({ id: `${e.cycle}-${occurrence}`, cycle: e.cycle, items: [e] });
+  }
+  function toggleCycle(groupId) {
+    setCollapsedCycles((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
 
   return (
     <div className="space-y-6">
@@ -172,29 +290,29 @@ export default function ProjectDetailPage() {
           <Link to="/projects" className="text-sm text-muted hover:text-primary">← Projects</Link>
           <h1 className="font-display text-3xl font-semibold mt-2">{project.title}</h1>
           <p className="text-sm text-muted mt-1 max-w-3xl">{project.goal}</p>
-          <div className="flex flex-wrap gap-2 mt-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2 mt-3 text-xs">
+            <span
+              className={`badge inline-flex items-center gap-1.5 font-semibold ${headerToneClasses.badge}`}
+            >
+              {live && <IconLoader width={12} height={12} />}
+              Stage: {stageLabel(activeStage)}
+            </span>
+            <span className="badge bg-slate-100 capitalize">{project.status}</span>
             {project.client_name && (
               <Link to={`/clients/${project.client_id}`} className="badge bg-emerald-50 text-success hover:underline">
                 {project.client_name}
               </Link>
             )}
-            <span className="badge bg-slate-100 capitalize">{project.status}</span>
-            <span
-              className={`badge ${
-                activeStage === 'error' || activeStage === 'blocked'
-                  ? 'bg-red-100 text-danger'
-                  : live
-                    ? 'bg-blue-100 text-primary'
-                    : 'bg-slate-100'
-              }`}
-            >
-              Stage: {stageLabel(activeStage)}
-            </span>
-            {cp.mode && <span className="badge bg-violet-50 text-violet-700">Mode: {cp.mode}</span>}
-            {project.overdue && <span className="badge bg-red-100 text-danger">Past due</span>}
+            {project.overdue && (
+              <span className="badge bg-red-100 text-danger inline-flex items-center gap-1">
+                <IconAlert width={11} height={11} />
+                Past due
+              </span>
+            )}
+            {cp.mode && <span className="badge bg-slate-50 text-muted">Mode: {cp.mode}</span>}
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
           {(project.status === 'draft' || project.status === 'paused') && (
             <button type="button" className="btn-primary" onClick={start}>Start worker</button>
           )}
@@ -204,9 +322,7 @@ export default function ProjectDetailPage() {
               Mark complete
             </button>
           )}
-          <button type="button" className="btn-ghost text-danger" disabled={deleting} onClick={removeProject}>
-            {deleting ? 'Deleting…' : 'Delete'}
-          </button>
+          <DeleteButton onConfirm={removeProject} deleting={deleting} />
         </div>
       </div>
 
@@ -242,7 +358,8 @@ export default function ProjectDetailPage() {
 
       {(project.stop_reason || project.last_error) && (
         <div className="card p-5 border border-red-200 bg-red-50 space-y-2">
-          <div className="font-semibold text-danger text-lg">
+          <div className="font-semibold text-danger text-lg flex items-center gap-2">
+            <IconAlert width={18} height={18} />
             Why it stopped: {stopLabel(project.stop_reason) || 'Error'}
           </div>
           <p className="text-sm text-danger/90 whitespace-pre-wrap">
@@ -262,7 +379,7 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      <div className="card p-5 space-y-4 border border-line">
+      <div className="card p-5 space-y-5 border border-line">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h2 className="font-semibold text-lg">Progress command center</h2>
@@ -279,35 +396,51 @@ export default function ProjectDetailPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        {/* Connected pipeline stepper */}
+        <div className="flex items-center overflow-x-auto pb-1">
           {displayPipeline.map((s, idx) => {
             const current = s.id === activeStage || (activeStage === 'waiting_retry' && s.id === 'planning');
             const done =
               activeIdx >= 0 &&
               pipelineIndex(s.id) < activeIdx &&
               !['error', 'blocked', 'waiting_retry'].includes(activeStage);
+            const last = idx === displayPipeline.length - 1;
             return (
-              <button
-                type="button"
-                key={s.id}
-                onClick={() => setStageFilter(s.id)}
-                className={`rounded-lg px-3 py-2 text-xs border min-w-[5.5rem] text-left ${
-                  current
-                    ? 'border-primary bg-blue-50 text-primary font-semibold'
-                    : done
-                      ? 'border-emerald-200 bg-emerald-50/80 text-success'
-                      : 'border-line bg-slate-50 text-muted'
-                }`}
-              >
-                <div className="uppercase tracking-wide text-[10px] opacity-70">{idx + 1}</div>
-                {s.label}
-                {current && live && <span className="ml-1 animate-pulse">●</span>}
-              </button>
+              <div key={s.id} className={`flex items-center ${last ? '' : 'flex-1 min-w-[7rem]'}`}>
+                <button
+                  type="button"
+                  onClick={() => setStageFilter(s.id)}
+                  className="flex items-center gap-2 shrink-0 group"
+                  title={`Filter timeline to ${s.label}`}
+                >
+                  <span
+                    className={`flex items-center justify-center h-7 w-7 rounded-full border-2 text-[11px] font-semibold shrink-0 ${
+                      current
+                        ? 'border-primary bg-blue-50 text-primary'
+                        : done
+                          ? 'border-success bg-emerald-50 text-success'
+                          : 'border-line bg-white text-muted'
+                    }`}
+                  >
+                    {done ? <IconCheck width={13} height={13} /> : current && live ? <IconLoader width={13} height={13} /> : idx + 1}
+                  </span>
+                  <span
+                    className={`text-xs whitespace-nowrap ${
+                      current ? 'text-primary font-semibold' : done ? 'text-success font-medium' : 'text-muted'
+                    } group-hover:underline`}
+                  >
+                    {s.label}
+                  </span>
+                </button>
+                {!last && (
+                  <div className={`flex-1 h-0.5 mx-2 min-w-[1rem] ${done ? 'bg-success' : 'bg-slate-200'}`} />
+                )}
+              </div>
             );
           })}
           {(['error', 'blocked', 'done', 'waiting_retry', 'idle', 'queued'].includes(activeStage)) && (
             <div
-              className={`rounded-lg px-3 py-2 text-xs border min-w-[5.5rem] font-semibold ${
+              className={`ml-3 rounded-lg px-3 py-1.5 text-xs border shrink-0 font-semibold ${
                 activeStage === 'done'
                   ? 'border-emerald-200 bg-emerald-50 text-success'
                   : activeStage === 'idle' || activeStage === 'queued'
@@ -320,39 +453,62 @@ export default function ProjectDetailPage() {
           )}
         </div>
 
-        <div className="rounded-xl bg-slate-50 border border-line p-3 text-sm space-y-2">
+        {/* Parallel sub-agent view for the current cycle */}
+        {!!subCards.length && (
           <div>
-            <span className="text-xs text-muted">Now</span>
-            <p className="mt-0.5 whitespace-pre-wrap font-medium">{cp.detail || events[0]?.summary || 'Waiting for worker…'}</p>
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-muted mb-2">
+              <IconUsers width={13} height={13} />
+              Sub-agents this cycle
+            </div>
+            <div className="grid sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              {subCards.map((e) => (
+                <SubAgentCard key={e.id} e={e} />
+              ))}
+            </div>
           </div>
-          {cp.last_summary && (
-            <div className="border-t border-line pt-2">
-              <span className="text-xs text-muted">Last summary</span>
-              <p className="mt-0.5 whitespace-pre-wrap text-muted">{cp.last_summary}</p>
-            </div>
-          )}
-          {cp.next_focus && (
-            <div className="border-t border-line pt-2">
-              <span className="text-xs text-muted">Next focus</span>
-              <p className="mt-0.5">{cp.next_focus}</p>
-            </div>
-          )}
-          {cp.memory?.last_critique && (
-            <div className="border-t border-line pt-2">
-              <span className="text-xs text-muted">Last critique (rethink)</span>
-              <p className="mt-0.5 whitespace-pre-wrap text-muted">{cp.memory.last_critique}</p>
-            </div>
-          )}
-          {!!cp.memory?.idea_backlog?.length && (
-            <div className="border-t border-line pt-2">
-              <span className="text-xs text-muted">Idea backlog</span>
-              <ul className="mt-1 list-disc pl-4 text-muted">
-                {cp.memory.idea_backlog.slice(-6).map((idea, i) => (
-                  <li key={i}>{idea}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+        )}
+
+        <div className="rounded-xl bg-slate-50 border border-line p-3 text-sm space-y-2">
+          {MEMORY_ROWS.map(({ key, icon: Icon, label }, i) => {
+            if (key === 'now') {
+              return (
+                <div key={key} className={i ? 'border-t border-line pt-2' : ''}>
+                  <span className="text-xs text-muted inline-flex items-center gap-1.5">
+                    <Icon width={12} height={12} />
+                    {label}
+                  </span>
+                  <p className="mt-0.5 whitespace-pre-wrap font-medium">{cp.detail || events[0]?.summary || 'Waiting for worker…'}</p>
+                </div>
+              );
+            }
+            if (key === 'idea_backlog') {
+              if (!cp.memory?.idea_backlog?.length) return null;
+              return (
+                <div key={key} className="border-t border-line pt-2">
+                  <span className="text-xs text-muted inline-flex items-center gap-1.5">
+                    <Icon width={12} height={12} />
+                    {label}
+                  </span>
+                  <ul className="mt-1 list-disc pl-4 text-muted">
+                    {cp.memory.idea_backlog.slice(-6).map((idea, ii) => (
+                      <li key={ii}>{idea}</li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            }
+            const value = key === 'last_critique' ? cp.memory?.last_critique : cp[key];
+            if (!value) return null;
+            return (
+              <div key={key} className="border-t border-line pt-2">
+                <span className="text-xs text-muted inline-flex items-center gap-1.5">
+                  <Icon width={12} height={12} />
+                  {label}
+                </span>
+                <p className="mt-0.5 whitespace-pre-wrap text-muted">{value}</p>
+              </div>
+            );
+          })}
           <div className="border-t border-line pt-2 grid sm:grid-cols-3 gap-2 text-xs text-muted">
             <div>Model: {cp.main_model || '—'}</div>
             <div>
@@ -366,12 +522,6 @@ export default function ProjectDetailPage() {
             <div>
               Tokens {project.tokens_used}/{project.token_budget}
             </div>
-            {cp.current_sub && (
-              <div className="sm:col-span-3 text-primary">
-                Active sub: {cp.current_sub.role} → {cp.current_sub.model} ({cp.current_sub.index}/
-                {cp.current_sub.of})
-              </div>
-            )}
             {project.claimed_by && (
               <div className="sm:col-span-3 font-mono truncate">Claimed: {project.claimed_by}</div>
             )}
@@ -383,7 +533,7 @@ export default function ProjectDetailPage() {
             {diagnostics.map((d, i) => (
               <div
                 key={i}
-                className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap ${
+                className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap flex items-start gap-2 ${
                   d.level === 'error'
                     ? 'bg-red-50 text-danger border border-red-100'
                     : d.level === 'warn'
@@ -391,7 +541,8 @@ export default function ProjectDetailPage() {
                       : 'bg-slate-50 text-muted border border-line'
                 }`}
               >
-                {d.text}
+                {d.level === 'error' && <IconAlert width={13} height={13} className="mt-0.5 shrink-0" />}
+                <span>{d.text}</span>
               </div>
             ))}
           </div>
@@ -399,8 +550,17 @@ export default function ProjectDetailPage() {
 
         <div className="border-t border-line pt-3 space-y-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h3 className="font-semibold text-sm">Full event timeline ({events.length})</h3>
-            <div className="flex gap-2 items-center">
+            <h3 className="font-semibold text-sm">Full event timeline ({filteredEvents.length}/{events.length})</h3>
+            <div className="flex gap-2 items-center flex-wrap">
+              <div className="relative">
+                <IconSearch width={13} height={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  className="input pl-7 text-xs py-1 w-40"
+                  placeholder="Search events…"
+                  value={eventSearch}
+                  onChange={(e) => setEventSearch(e.target.value)}
+                />
+              </div>
               <select
                 className="input text-xs py-1"
                 value={stageFilter}
@@ -411,80 +571,105 @@ export default function ProjectDetailPage() {
                   <option key={s.id} value={s.id}>{s.label}</option>
                 ))}
               </select>
-              {stageFilter !== 'all' && (
-                <button type="button" className="btn-ghost text-xs" onClick={() => setStageFilter('all')}>
-                  Clear filter
+              {(stageFilter !== 'all' || eventSearch) && (
+                <button
+                  type="button"
+                  className="btn-ghost text-xs"
+                  onClick={() => {
+                    setStageFilter('all');
+                    setEventSearch('');
+                  }}
+                >
+                  Clear filters
                 </button>
               )}
             </div>
           </div>
-          <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-            {filteredEvents.map((e) => {
-              const open = expandedEvent === e.id;
-              const isErr = e.status === 'error' || e.error_full;
+          <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+            {eventGroups.map((group) => {
+              const collapsed = collapsedCycles.has(group.id);
               return (
-                <div
-                  key={e.id}
-                  className={`rounded-lg border px-3 py-2 text-xs ${
-                    isErr ? 'border-red-200 bg-red-50/60' : 'border-line bg-white'
-                  }`}
-                >
+                <div key={group.id} className="space-y-2">
                   <button
                     type="button"
-                    className="w-full text-left"
-                    onClick={() => setExpandedEvent(open ? null : e.id)}
+                    onClick={() => toggleCycle(group.id)}
+                    className="w-full flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted bg-slate-50 rounded-lg px-2.5 py-1.5 hover:bg-slate-100"
                   >
-                    <div className="flex flex-wrap gap-x-2 gap-y-1 items-baseline">
-                      <span className="font-mono text-muted">
-                        #{e.cycle}.{e.seq}
-                      </span>
-                      <span className="font-semibold">{stageLabel(e.stage)}</span>
-                      <span className="text-muted">{e.action || e.status}</span>
-                      {e.model && <span className="font-mono text-[10px] text-muted">{e.model}</span>}
-                      {e.role && <span className="badge bg-slate-100">{e.role}</span>}
-                      <span className="text-muted ml-auto">
-                        {new Date(e.created_at).toLocaleString()}
-                        {e.duration_ms != null ? ` · ${e.duration_ms}ms` : ''}
-                        {e.tokens_used ? ` · ${e.tokens_used} tok` : ''}
-                      </span>
-                    </div>
-                    <p className={`mt-1 ${open ? 'whitespace-pre-wrap' : 'line-clamp-2'}`}>
-                      {e.summary || e.detail || '(no summary)'}
-                    </p>
+                    <span>Cycle {group.cycle} · {group.items.length} event{group.items.length === 1 ? '' : 's'}</span>
+                    <span className={`transition-transform ${collapsed ? '' : 'rotate-90'}`}>›</span>
                   </button>
-                  {open && (
-                    <div className="mt-2 space-y-2 border-t border-line pt-2">
-                      {e.detail && (
-                        <div>
-                          <div className="text-[10px] uppercase text-muted mb-0.5">Detail</div>
-                          <pre className="whitespace-pre-wrap break-words text-[11px] bg-slate-50 p-2 rounded max-h-64 overflow-y-auto">
-                            {e.detail}
-                          </pre>
-                        </div>
-                      )}
-                      {e.error_full && (
-                        <div>
-                          <div className="text-[10px] uppercase text-danger mb-0.5">Full error</div>
-                          <pre className="whitespace-pre-wrap break-words text-[11px] bg-red-100/50 p-2 rounded max-h-80 overflow-y-auto text-danger">
-                            {e.error_full}
-                          </pre>
+                  {!collapsed &&
+                    group.items.map((e) => {
+                      const open = expandedEvent === e.id;
+                      const isErr = e.status === 'error' || e.error_full;
+                      const tone = stageTone(isErr ? 'error' : e.stage);
+                      const tc = toneClasses(tone);
+                      return (
+                        <div
+                          key={e.id}
+                          className={`rounded-lg border-l-4 border border-line bg-white text-xs pl-2.5 py-2 pr-3 ${tc.borderL}`}
+                        >
                           <button
                             type="button"
-                            className="btn-ghost text-[10px] mt-1"
-                            onClick={() => navigator.clipboard?.writeText(e.error_full)}
+                            className="w-full text-left"
+                            onClick={() => setExpandedEvent(open ? null : e.id)}
                           >
-                            Copy error
+                            <div className="flex flex-wrap gap-x-2 gap-y-1 items-baseline">
+                              <span className="font-mono text-muted">
+                                #{e.cycle}.{e.seq}
+                              </span>
+                              <span className="font-semibold">{stageLabel(e.stage)}</span>
+                              <span className="text-muted">{e.action || e.status}</span>
+                              {e.model && <span className="font-mono text-[10px] text-muted">{e.model}</span>}
+                              {e.role && <span className="badge bg-slate-100">{e.role}</span>}
+                              <span className="text-muted ml-auto">
+                                {new Date(e.created_at).toLocaleString()}
+                                {e.duration_ms != null ? ` · ${e.duration_ms}ms` : ''}
+                                {e.tokens_used ? ` · ${e.tokens_used} tok` : ''}
+                              </span>
+                            </div>
+                            <p className={`mt-1 ${open ? 'whitespace-pre-wrap' : 'line-clamp-2'}`}>
+                              {e.summary || e.detail || '(no summary)'}
+                            </p>
                           </button>
+                          {open && (
+                            <div className="mt-2 space-y-2 border-t border-line pt-2">
+                              {e.detail && (
+                                <div>
+                                  <div className="text-[10px] uppercase text-muted mb-0.5">Detail</div>
+                                  <pre className="whitespace-pre-wrap break-words text-[11px] bg-slate-50 p-2 rounded max-h-64 overflow-y-auto">
+                                    {e.detail}
+                                  </pre>
+                                </div>
+                              )}
+                              {e.error_full && (
+                                <div>
+                                  <div className="text-[10px] uppercase text-danger mb-0.5">Full error</div>
+                                  <pre className="whitespace-pre-wrap break-words text-[11px] bg-red-100/50 p-2 rounded max-h-80 overflow-y-auto text-danger">
+                                    {e.error_full}
+                                  </pre>
+                                  <button
+                                    type="button"
+                                    className="btn-ghost text-[10px] mt-1"
+                                    onClick={() => navigator.clipboard?.writeText(e.error_full)}
+                                  >
+                                    Copy error
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  )}
+                      );
+                    })}
                 </div>
               );
             })}
             {!filteredEvents.length && (
               <p className="text-xs text-muted">
-                No events yet. Start the project and keep Worker running — every planning / sub-agent / synthesis / review / save step lands here.
+                {events.length
+                  ? 'No events match this filter/search.'
+                  : 'No events yet. Start the project and keep Worker running — every planning / sub-agent / synthesis / review / save step lands here.'}
               </p>
             )}
           </div>
@@ -539,6 +724,15 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
+      {/* Output pipeline: agent chat/output → pending approval → shared docs */}
+      <div className="flex items-center gap-2 text-xs text-muted px-1 flex-wrap">
+        <span className="inline-flex items-center gap-1 font-medium text-ink"><IconMessage width={13} height={13} /> Agent output</span>
+        <IconArrowRight width={12} height={12} />
+        <span className="inline-flex items-center gap-1 font-medium text-ink">Pending approval</span>
+        <IconArrowRight width={12} height={12} />
+        <span className="inline-flex items-center gap-1 font-medium text-ink">Shared docs</span>
+      </div>
+
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="card p-5 flex flex-col min-h-[420px]">
           <div className="flex items-center justify-between mb-3">
@@ -585,9 +779,22 @@ export default function ProjectDetailPage() {
                   <div className="text-sm font-medium">{d.title}</div>
                   <div className="text-xs text-muted mt-0.5 line-clamp-2">{d.description}</div>
                   <div className="flex gap-2 mt-2">
-                    <button type="button" className="btn-primary text-xs py-1" onClick={() => approveDoc(d.id)}>Approve</button>
-                    <button type="button" className="btn-ghost text-xs py-1 text-danger" onClick={() => rejectDoc(d.id)}>Reject</button>
+                    <button
+                      type="button"
+                      className="btn-primary text-xs py-1 inline-flex items-center gap-1"
+                      onClick={() => approveDoc(d.id)}
+                    >
+                      <IconCheck width={12} height={12} /> Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost text-xs py-1 text-danger inline-flex items-center gap-1"
+                      onClick={() => rejectDoc(d.id)}
+                    >
+                      <IconX width={12} height={12} /> Reject
+                    </button>
                     <a className="btn-ghost text-xs py-1" href={`/api/documents/${d.id}/download`}>Preview</a>
+                    <a className="btn-ghost text-xs py-1" href={`/api/documents/${d.id}/export/docx`} download>Export Word</a>
                   </div>
                 </div>
               ))}
@@ -599,10 +806,19 @@ export default function ProjectDetailPage() {
             <h2 className="font-semibold mb-3">Approved on this project</h2>
             <div className="space-y-2 max-h-40 overflow-y-auto">
               {documents.map((d) => (
-                <a key={d.id} href={`/api/documents/${d.id}/download`} className="block rounded-lg border border-line px-3 py-2 hover:bg-slate-50 text-sm">
-                  <div className="font-medium truncate">{d.title}</div>
-                  <div className="text-xs text-muted">Shared doc ID = title</div>
-                </a>
+                <div key={d.id} className="rounded-lg border border-line px-3 py-2 hover:bg-slate-50 text-sm">
+                  <a href={`/api/documents/${d.id}/download`} className="block">
+                    <div className="font-medium truncate">{d.title}</div>
+                    <div className="text-xs text-muted">Shared doc ID = title</div>
+                  </a>
+                  <a
+                    className="text-xs text-primary font-medium hover:underline"
+                    href={`/api/documents/${d.id}/export/docx`}
+                    download
+                  >
+                    Export Word
+                  </a>
+                </div>
               ))}
               {!documents.length && <p className="text-sm text-muted">Approve staged docs to publish here + Shared docs</p>}
             </div>

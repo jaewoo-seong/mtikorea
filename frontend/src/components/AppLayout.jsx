@@ -144,6 +144,9 @@ export default function AppLayout({ user, onLogout }) {
               </NavLink>
             </>
           )}
+          <NavLink to="/settings" className={({ isActive }) => linkClass(isActive)}>
+            Settings
+          </NavLink>
         </nav>
 
         <div className="mt-auto pt-6 border-t border-line">
