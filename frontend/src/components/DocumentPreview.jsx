@@ -163,11 +163,38 @@ export default function DocumentPreview({ documentId }) {
   const { data } = state;
   const exportUrl = `/api/documents/${documentId}/export/docx`;
   const downloadUrl = `/api/documents/${documentId}/download`;
+  const rawUrl = `/api/documents/${documentId}/raw`;
+
+  if (data?.isImage) {
+    return (
+      <div className="space-y-2">
+        <div className="rounded-lg border border-line bg-slate-50 p-2 flex items-center justify-center max-h-96 overflow-auto">
+          <img src={rawUrl} alt="" className="max-w-full max-h-[22rem] object-contain" />
+        </div>
+        <a className="text-primary font-medium hover:underline text-xs" href={downloadUrl}>
+          Download
+        </a>
+      </div>
+    );
+  }
+
+  if (data?.isPdf) {
+    return (
+      <div className="space-y-2">
+        <iframe title="PDF preview" src={rawUrl} className="w-full h-96 rounded-lg border border-line" />
+        <a className="text-primary font-medium hover:underline text-xs" href={downloadUrl}>
+          Download
+        </a>
+      </div>
+    );
+  }
 
   if (!data?.isText) {
     return (
       <div className="rounded-lg border border-line bg-slate-50 px-3 py-2 text-sm">
-        <p className="text-muted">Preview not available for this file type</p>
+        <p className="text-muted">
+          Preview not available for {data?.mimeType || 'this file type'}
+        </p>
         <a className="text-primary font-medium hover:underline text-xs" href={downloadUrl}>
           Download
         </a>

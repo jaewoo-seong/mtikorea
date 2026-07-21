@@ -133,6 +133,8 @@ export const api = {
       request(`/api/documents/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     approve: (id) => request(`/api/documents/${id}/approve`, { method: 'POST', body: '{}' }),
     reject: (id) => request(`/api/documents/${id}/reject`, { method: 'POST', body: '{}' }),
+    compose: (body) => request('/api/documents/compose', { method: 'POST', body: JSON.stringify(body) }),
+    storageUsage: () => request('/api/documents/storage-usage'),
   },
 
   documentFolders: {

@@ -127,6 +127,30 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
   );
 }
 
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function fileKind(mimeType) {
+  if (!mimeType) return { label: 'File', tone: 'bg-slate-100 text-muted' };
+  if (mimeType.startsWith('image/')) return { label: 'Image', tone: 'bg-violet-50 text-violet-700' };
+  if (mimeType === 'application/pdf') return { label: 'PDF', tone: 'bg-red-50 text-danger' };
+  if (mimeType.startsWith('text/') || mimeType === 'application/json') {
+    return { label: 'Text', tone: 'bg-emerald-50 text-success' };
+  }
+  if (mimeType.includes('word') || mimeType.includes('document')) {
+    return { label: 'Doc', tone: 'bg-blue-50 text-primary' };
+  }
+  if (mimeType.includes('sheet') || mimeType.includes('excel')) {
+    return { label: 'Sheet', tone: 'bg-teal-50 text-teal-700' };
+  }
+  return { label: 'File', tone: 'bg-slate-100 text-muted' };
+}
+
 function SkeletonCard() {
   return (
     <div className="card p-5 animate-pulse space-y-3">
@@ -154,6 +178,11 @@ export default function DocumentsPage() {
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [storageUsage, setStorageUsage] = useState(null);
+  const [composing, setComposing] = useState(false);
+  const [composeTitle, setComposeTitle] = useState('');
+  const [composeContent, setComposeContent] = useState('');
+  const [composeSaving, setComposeSaving] = useState(false);
   const toast = useToast();
 
   const folderTree = buildFolderTree(folders);
@@ -225,8 +254,13 @@ export default function DocumentsPage() {
     setProjects(p.projects);
   }
 
+  async function loadStorageUsage() {
+    setStorageUsage(await api.documents.storageUsage());
+  }
+
   useEffect(() => {
     loadFolders().catch((e) => toast.error(e.message));
+    loadStorageUsage().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -249,9 +283,36 @@ export default function DocumentsPage() {
       setFile(null);
       setTitle('');
       toast.success('Uploaded — linked to filters above');
-      await load();
+      await Promise.all([load(), loadStorageUsage()]);
     } catch (err) {
       toast.error(err.message);
+    }
+  }
+
+  async function composeDocument(e) {
+    e.preventDefault();
+    if (!composeTitle.trim()) {
+      toast.error('Title is required');
+      return;
+    }
+    setComposeSaving(true);
+    try {
+      await api.documents.compose({
+        title: composeTitle.trim(),
+        content: composeContent,
+        clientId: clientId || undefined,
+        projectId: projectId || undefined,
+        folderId: folderFilter !== 'all' && folderFilter !== 'root' ? folderFilter : undefined,
+      });
+      toast.success('Document created');
+      setComposeTitle('');
+      setComposeContent('');
+      setComposing(false);
+      await Promise.all([load(), loadStorageUsage()]);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setComposeSaving(false);
     }
   }
 
@@ -347,6 +408,24 @@ export default function DocumentsPage() {
         </div>
 
         <div className="space-y-6 min-w-0">
+      {storageUsage && (
+        <div className="card p-4">
+          <div className="flex items-center justify-between text-xs mb-1.5">
+            <span className="font-semibold text-muted">Storage used</span>
+            <span className="font-mono text-muted">
+              {formatBytes(storageUsage.usedBytes)} / {formatBytes(storageUsage.limitBytes)}
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+            <div
+              className={`h-full rounded-full ${
+                storageUsage.usedBytes / storageUsage.limitBytes >= 0.9 ? 'bg-danger' : 'bg-primary'
+              }`}
+              style={{ width: `${Math.min(100, (storageUsage.usedBytes / storageUsage.limitBytes) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
       <div className="card p-4 grid md:grid-cols-3 gap-3">
         <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
           <option value="">All projects</option>
@@ -365,14 +444,53 @@ export default function DocumentsPage() {
         </button>
       </div>
 
-      <form onSubmit={upload} className="card p-4 grid md:grid-cols-4 gap-3">
-        <input className="input" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-        <div className="text-xs text-muted self-center">
-          Upload uses current project/client filters when set
+      <div className="card p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">Add documents</span>
+          <button
+            type="button"
+            className="text-xs text-primary hover:underline font-medium"
+            onClick={() => setComposing((v) => !v)}
+          >
+            {composing ? 'Cancel new document' : '+ New document'}
+          </button>
         </div>
-        <button className="btn-primary" type="submit">Upload</button>
-      </form>
+
+        <form onSubmit={upload} className="grid md:grid-cols-4 gap-3">
+          <input className="input" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          <div className="text-xs text-muted self-center">
+            Upload uses current project/client filters when set
+          </div>
+          <button className="btn-primary" type="submit">Upload</button>
+        </form>
+
+        {composing && (
+          <form onSubmit={composeDocument} className="space-y-2 pt-3 border-t border-line">
+            <input
+              className="input"
+              placeholder="Title"
+              value={composeTitle}
+              onChange={(e) => setComposeTitle(e.target.value)}
+              autoFocus
+            />
+            <textarea
+              className="input min-h-[140px] font-mono text-sm"
+              placeholder="Write the document content — markdown supported (headings, **bold**, tables)…"
+              value={composeContent}
+              onChange={(e) => setComposeContent(e.target.value)}
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted">
+                Saved directly as a document — uses current project/client/folder filters when set
+              </span>
+              <button className="btn-primary" type="submit" disabled={composeSaving}>
+                {composeSaving ? 'Saving…' : 'Create document'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
 
       {documents === null && (
         <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -395,8 +513,12 @@ export default function DocumentsPage() {
             className="card p-5 flex flex-col gap-3 border border-line min-w-0 cursor-grab active:cursor-grabbing"
           >
             <div>
-              <h2 className="font-semibold text-base leading-snug">{d.title}</h2>
+              <div className="flex items-start justify-between gap-2">
+                <h2 className="font-semibold text-base leading-snug">{d.title}</h2>
+                <span className={`badge shrink-0 ${fileKind(d.mime_type).tone}`}>{fileKind(d.mime_type).label}</span>
+              </div>
               <p className="text-xs text-muted mt-1 truncate">{d.description || d.filename}</p>
+              <p className="text-[11px] text-muted mt-0.5 font-mono">{formatBytes(d.size_bytes)}</p>
             </div>
             <div className="flex flex-wrap gap-2 text-xs">
               {d.project_id ? (

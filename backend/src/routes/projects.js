@@ -3,6 +3,7 @@ const multer = require('multer');
 const { query } = require('../lib/db');
 const { requireAuth } = require('../lib/auth');
 const { saveBuffer, resolvePath } = require('../lib/storage');
+const { assertStorageRoom } = require('../lib/storageQuota');
 const { projectProgress } = require('../lib/projectProgress');
 const { recordEvent } = require('../lib/agentEvents');
 const { cleanPrompt } = require('../lib/llm');
@@ -273,6 +274,8 @@ router.post('/:id/files', upload.array('files', 20), async (req, res, next) => {
     if (project.rows[0].status === 'running') {
       return res.status(409).json({ error: 'Stop project before uploading more files' });
     }
+    const incomingBytes = (req.files || []).reduce((sum, f) => sum + f.size, 0);
+    await assertStorageRoom(req.user.org_id, incomingBytes);
     const created = [];
     for (const file of req.files || []) {
       const saved = saveBuffer(`projects/${req.params.id}`, file.originalname, file.buffer);

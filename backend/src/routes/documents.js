@@ -14,7 +14,8 @@ const {
 } = require('docx');
 const { query } = require('../lib/db');
 const { requireAuth } = require('../lib/auth');
-const { saveBuffer, resolvePath } = require('../lib/storage');
+const { saveBuffer, resolvePath, readFile } = require('../lib/storage');
+const { ORG_STORAGE_LIMIT_BYTES, getOrgStorageUsage, assertStorageRoom } = require('../lib/storageQuota');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024 } });
 const router = express.Router();
@@ -207,10 +208,20 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+router.get('/storage-usage', async (req, res, next) => {
+  try {
+    const used = await getOrgStorageUsage(req.user.org_id);
+    res.json({ usedBytes: used, limitBytes: ORG_STORAGE_LIMIT_BYTES });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/', upload.single('file'), async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
     if (!req.file) return res.status(400).json({ error: 'file required' });
+    await assertStorageRoom(req.user.org_id, req.file.size);
     let { title, description, clientId, projectId, visibility } = req.body || {};
     const vis = visibility === 'staged' ? 'staged' : 'shared';
 
@@ -244,6 +255,53 @@ router.post('/', upload.single('file'), async (req, res, next) => {
         vis,
         vis === 'shared' ? new Date() : null,
         vis === 'shared' ? req.user.id : null,
+      ]
+    );
+    res.status(201).json({ document: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Manually authored document — no upload, just a title + markdown/text body typed
+// directly in the UI. Saved and approved the same way as an upload.
+router.post('/compose', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const title = String(req.body?.title || '').trim();
+    const content = String(req.body?.content || '');
+    if (!title) return res.status(400).json({ error: 'title required' });
+    const buffer = Buffer.from(content, 'utf8');
+    await assertStorageRoom(req.user.org_id, buffer.length);
+    let { clientId, projectId, folderId } = req.body || {};
+
+    if (projectId && !clientId) {
+      const proj = await query(
+        'SELECT client_id FROM projects WHERE id = $1 AND org_id = $2',
+        [projectId, req.user.org_id]
+      );
+      if (proj.rows[0]?.client_id) clientId = proj.rows[0].client_id;
+    }
+
+    const filename = `${title.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80) || 'note'}.md`;
+    const saved = saveBuffer('shared', filename, buffer);
+    const { rows } = await query(
+      `INSERT INTO shared_documents (
+         org_id, client_id, project_id, folder_id, title, description, filename, mime_type,
+         size_bytes, storage_path, uploaded_by, visibility, source, approved_at, approved_by
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'text/markdown',$8,$9,$10,'shared','manual',now(),$10)
+       RETURNING *`,
+      [
+        req.user.org_id,
+        clientId || null,
+        projectId || null,
+        folderId || null,
+        title,
+        'Composed in-app',
+        filename,
+        saved.size,
+        saved.storagePath,
+        req.user.id,
       ]
     );
     res.status(201).json({ document: rows[0] });
@@ -332,6 +390,25 @@ router.get('/:id/download', async (req, res, next) => {
   }
 });
 
+// Inline (non-attachment) file serving so <img>/<iframe> can embed images and PDFs
+// directly, rather than triggering a browser download like /download does.
+router.get('/:id/raw', async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      'SELECT * FROM shared_documents WHERE id = $1 AND org_id = $2',
+      [req.params.id, req.user.org_id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+    const doc = rows[0];
+    const buf = readFile(doc.storage_path);
+    res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'inline');
+    res.send(buf);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id/preview', async (req, res, next) => {
   try {
     const { rows } = await query(
@@ -340,11 +417,17 @@ router.get('/:id/preview', async (req, res, next) => {
     );
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
     const doc = rows[0];
+    const mimeType = doc.mime_type || null;
+    const isImage = Boolean(mimeType && mimeType.startsWith('image/'));
+    const isPdf = mimeType === 'application/pdf';
+    if (isImage || isPdf) {
+      return res.json({ isText: false, isImage, isPdf, mimeType, sizeBytes: doc.size_bytes });
+    }
     const result = resolveTextContent(doc);
     if (!result.isText) {
-      return res.json({ isText: false, mimeType: doc.mime_type || null });
+      return res.json({ isText: false, isImage: false, isPdf: false, mimeType, sizeBytes: doc.size_bytes });
     }
-    res.json({ isText: true, content: result.content, mimeType: doc.mime_type || null });
+    res.json({ isText: true, isImage: false, isPdf: false, content: result.content, mimeType, sizeBytes: doc.size_bytes });
   } catch (err) {
     next(err);
   }
