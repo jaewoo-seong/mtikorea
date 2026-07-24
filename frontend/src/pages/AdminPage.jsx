@@ -145,17 +145,17 @@ export default function AdminPage({ user }) {
 
       <div className="card overflow-hidden p-0 gap-0">
         <table className="w-full text-sm">
-          <thead className="bg-surface text-muted text-left">
+          <thead className="bg-neutral-300 text-neutral-800 text-left border-b border-line-strong">
             <tr>
-              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">User</th>
-              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Role</th>
-              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Active</th>
-              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Password</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">User</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Role</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Active</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Password</th>
             </tr>
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} className="border-t border-line">
+              <tr key={u.id} className="border-t border-line odd:bg-black/[0.025]">
                 <td className="px-4 py-3">
                   <div className="font-medium">{u.name || '—'}</div>
                   <div className="text-muted text-xs">
@@ -242,18 +242,18 @@ export default function AdminPage({ user }) {
 
       <div className="card overflow-hidden p-0 gap-0">
         <table className="w-full text-sm">
-          <thead className="bg-surface text-muted text-left">
+          <thead className="bg-neutral-300 text-neutral-800 text-left border-b border-line-strong">
             <tr>
-              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Label</th>
-              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Provider</th>
-              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Models</th>
-              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Status</th>
-              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Actions</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Label</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Provider</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Models</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Status</th>
+              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Actions</th>
             </tr>
           </thead>
           <tbody>
             {llmKeys.map((k) => (
-              <tr key={k.id} className="border-t border-line align-top">
+              <tr key={k.id} className="border-t border-line align-top odd:bg-black/[0.025]">
                 <td className="px-4 py-3">
                   <div className="font-medium">{k.label}</div>
                   <div className="text-muted text-xs font-mono">{k.api_key}</div>
@@ -262,7 +262,7 @@ export default function AdminPage({ user }) {
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1 max-w-xs">
                     {(k.models || []).map((m) => (
-                      <span key={m} className="badge-neutral text-[11px] font-mono">{m}</span>
+                      <span key={m} className="badge-neutral text-xs font-mono">{m}</span>
                     ))}
                     {!k.models?.length && <span className="text-xs text-muted">No models set</span>}
                   </div>
@@ -270,7 +270,7 @@ export default function AdminPage({ user }) {
                 <td className="px-4 py-3">
                   <KeyStatusBadge status={k.status} />
                   {k.status === 'unhealthy' && k.last_error && (
-                    <div className="text-[11px] text-danger mt-1 max-w-xs truncate" title={k.last_error}>
+                    <div className="text-xs text-danger mt-1 max-w-xs truncate" title={k.last_error}>
                       {k.last_error}
                     </div>
                   )}

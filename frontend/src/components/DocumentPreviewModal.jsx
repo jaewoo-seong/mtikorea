@@ -63,7 +63,7 @@ export default function DocumentPreviewModal({
       <header className="shrink-0 h-14 border-b border-line flex items-center gap-3 px-4">
         <div className="min-w-0 flex-1">
           <div className="font-display font-semibold truncate text-ink">{doc.title}</div>
-          <div className="text-[11px] text-muted truncate">
+          <div className="text-xs text-muted truncate">
             {kindLabel}
             {doc.filename ? ` · ${doc.filename}` : ''}
             {index >= 0 ? ` · ${index + 1} of ${siblings.length}` : ''}
@@ -72,7 +72,7 @@ export default function DocumentPreviewModal({
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            className="btn-secondary text-xs py-1.5 px-2 inline-flex items-center gap-1 disabled:opacity-40"
+            className="btn-secondary text-xs py-1.5 px-2 inline-flex items-center gap-1 disabled:opacity-60"
             disabled={!hasPrev}
             onClick={() => hasPrev && onNavigate(siblings[index - 1].id)}
             title="Previous (←)"
@@ -82,7 +82,7 @@ export default function DocumentPreviewModal({
           </button>
           <button
             type="button"
-            className="btn-secondary text-xs py-1.5 px-2 inline-flex items-center gap-1 disabled:opacity-40"
+            className="btn-secondary text-xs py-1.5 px-2 inline-flex items-center gap-1 disabled:opacity-60"
             disabled={!hasNext}
             onClick={() => hasNext && onNavigate(siblings[index + 1].id)}
             title="Next (→)"

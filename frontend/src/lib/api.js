@@ -129,16 +129,39 @@ export const api = {
       ).toString();
       return request(`/api/tasks${q ? `?${q}` : ''}`);
     },
+    get: (id) => request(`/api/tasks/${id}`),
     create: (body) => request('/api/tasks', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) =>
       request(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id) => request(`/api/tasks/${id}`, { method: 'DELETE' }),
-    approve: (id) => request(`/api/tasks/${id}/approve`, { method: 'POST', body: '{}' }),
-    reject: (id, note) =>
-      request(`/api/tasks/${id}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
     unread: () => request('/api/tasks/unread'),
+    counts: () => request('/api/tasks/counts'),
+    // decision: 'approved' | 'rejected' | 'changes_requested'
+    decide: (id, decision, note) =>
+      request(`/api/tasks/${id}/decision`, {
+        method: 'POST',
+        body: JSON.stringify({ decision, note }),
+      }),
+    participants: {
+      add: (taskId, userIds, role) =>
+        request(`/api/tasks/${taskId}/participants`, {
+          method: 'POST',
+          body: JSON.stringify({ userIds, role }),
+        }),
+      remove: (taskId, userId) =>
+        request(`/api/tasks/${taskId}/participants/${userId}`, { method: 'DELETE' }),
+    },
+    attachments: {
+      add: (taskId, documentIds) =>
+        request(`/api/tasks/${taskId}/attachments`, {
+          method: 'POST',
+          body: JSON.stringify({ documentIds }),
+        }),
+      remove: (taskId, documentId) =>
+        request(`/api/tasks/${taskId}/attachments/${documentId}`, { method: 'DELETE' }),
+    },
+    thread: (taskId) => request(`/api/tasks/${taskId}/thread`),
     comments: {
-      list: (taskId) => request(`/api/tasks/${taskId}/comments`),
       add: (taskId, body) =>
         request(`/api/tasks/${taskId}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
     },

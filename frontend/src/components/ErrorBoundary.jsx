@@ -28,7 +28,7 @@ export default class ErrorBoundary extends Component {
               The page hit an unexpected error and stopped rendering. Your data is safe — this is a
               display issue.
             </p>
-            <pre className="text-[11px] bg-surface p-3 rounded max-h-40 overflow-auto text-muted whitespace-pre-wrap">
+            <pre className="text-xs bg-surface p-3 rounded max-h-40 overflow-auto text-muted whitespace-pre-wrap">
               {String(this.state.error?.message || this.state.error)}
             </pre>
             <div className="flex gap-2">

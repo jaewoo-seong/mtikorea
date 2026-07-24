@@ -19,7 +19,7 @@ function ToolbarButton({ active, disabled, onClick, children, title }) {
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`px-2 py-1 text-xs font-medium border border-transparent disabled:opacity-40 ${
+      className={`px-2 py-1 text-xs font-medium border border-transparent disabled:opacity-60 ${
         active ? 'bg-acc-100 text-primary border-line' : 'hover:bg-black/[0.04] text-ink'
       }`}
     >

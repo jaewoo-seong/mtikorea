@@ -5,7 +5,17 @@
 /* "Continuum" design language — see .design-ref/design-tokens-fixed.css for the
    full reference stylesheet these tokens/classes were ported from. */
 :root {
-  --divider: rgba(29, 31, 32, 0.16);
+  --divider: rgba(29, 31, 32, 0.22);
+  --divider-strong: rgba(29, 31, 32, 0.52);
+}
+
+/* Keyboard focus was previously invisible app-wide: `.input` set `outline-none`
+   and only shifted its (barely visible) border, and buttons had no focus style
+   at all. One ring, applied to everything focusable, so tab order is followable. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #4a6d8f;
+  outline-offset: 2px;
+  border-radius: 1px;
 }
 
 body {
@@ -28,10 +38,10 @@ h1, h2, h3, h4, h5, h6 {
     @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 text-sm font-display font-semibold transition border border-transparent;
   }
   .btn-primary {
-    @apply btn bg-primary text-canvas border-primary hover:bg-acc-600 active:bg-acc-700;
+    @apply btn bg-primary text-canvas border-primary hover:bg-acc-700 active:bg-acc-800;
   }
   .btn-secondary {
-    @apply btn border-line text-ink hover:bg-black/[0.04] active:bg-black/[0.08];
+    @apply btn border-line-strong text-ink hover:bg-black/[0.04] active:bg-black/[0.08];
   }
   .btn-ghost {
     @apply btn text-primary border-transparent px-2 hover:bg-primary/10 active:bg-primary/[0.18];
@@ -43,16 +53,16 @@ h1, h2, h3, h4, h5, h6 {
     @apply relative border border-line bg-transparent flex flex-col gap-2 p-3;
   }
   .card-kicker {
-    @apply text-[10px] tracking-[0.1em] uppercase text-primary;
+    @apply text-xs tracking-[0.1em] uppercase text-primary;
   }
   .card-title {
     @apply font-display font-semibold text-[17px] leading-tight;
   }
   .input {
-    @apply w-full min-h-[36px] border border-line bg-surface px-2.5 py-1.5 text-sm text-ink outline-none placeholder:text-muted focus:border-primary;
+    @apply w-full min-h-[36px] border border-line-strong bg-surface px-2.5 py-1.5 text-sm text-ink placeholder:text-muted focus:border-primary;
   }
   .badge {
-    @apply inline-flex items-center text-[11px] tracking-wide px-2.5 py-[3px];
+    @apply inline-flex items-center text-xs tracking-wide px-2.5 py-[3px];
   }
   .badge-accent {
     @apply badge bg-acc-100 text-acc-800;
@@ -70,10 +80,10 @@ h1, h2, h3, h4, h5, h6 {
   /* Segmented control — exclusive-choice button group sharing one border
      (time-budget presets, document-type picker, etc). */
   .seg {
-    @apply inline-flex overflow-hidden border border-line;
+    @apply inline-flex overflow-hidden border border-line-strong;
   }
   .seg-opt {
-    @apply px-3 py-1.5 text-[13px] cursor-pointer border-l border-line first:border-l-0;
+    @apply px-3 py-1.5 text-[13px] cursor-pointer border-l border-line-strong first:border-l-0;
   }
   .seg-opt-active {
     @apply bg-primary text-canvas;

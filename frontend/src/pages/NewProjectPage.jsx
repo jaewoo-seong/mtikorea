@@ -285,7 +285,7 @@ export default function NewProjectPage() {
                 onChange={(e) => setTimeBudgetMinutes(Number(e.target.value))}
                 className="w-full accent-primary"
               />
-              <div className="flex justify-between text-[11px] text-muted">
+              <div className="flex justify-between text-xs text-muted">
                 <span>5 min</span>
                 <span>12 hours</span>
               </div>

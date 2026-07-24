@@ -83,23 +83,23 @@ export default function ClientsPage() {
       <div className="card overflow-hidden p-0 gap-0">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[900px]">
-            <thead className="bg-surface text-muted text-left">
+            <thead className="bg-neutral-300 text-neutral-800 text-left border-b border-line-strong">
               <tr>
-                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Company</th>
-                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Korean name</th>
-                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Industry</th>
-                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Email</th>
-                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Status</th>
-                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Docs</th>
-                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Projects</th>
-                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Tasks</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wide">Company</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wide">Korean name</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wide">Industry</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wide">Email</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wide">Status</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wide">Docs</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wide">Projects</th>
+                <th className="px-4 py-3 font-semibold text-xs uppercase tracking-wide">Requests</th>
               </tr>
             </thead>
             <tbody>
               {clients.map((c) => (
                 <tr
                   key={c.id}
-                  className="border-t border-line hover:bg-acc-100/60 cursor-pointer"
+                  className="border-t border-line odd:bg-black/[0.025] hover:bg-acc-100/60 cursor-pointer"
                   onClick={() => navigate(`/clients/${c.id}`)}
                 >
                   <td className="px-4 py-3 font-semibold text-primary">{c.name}</td>

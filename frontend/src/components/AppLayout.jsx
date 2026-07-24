@@ -6,7 +6,7 @@ import { IconMenu, IconX } from '../lib/icons';
 const WORKSPACE_NAV = [
   { to: '/projects', label: 'Projects' },
   { to: '/documents', label: 'Documents' },
-  { to: '/tasks', label: 'Tasks' },
+  { to: '/tasks', label: 'Requests' },
 ];
 
 function linkClass(isActive) {
@@ -43,7 +43,7 @@ function SectionHeader({ title, open, onToggle }) {
       className="mt-4 mb-1 w-full flex items-center justify-between px-3 py-1.5 hover:bg-black/[0.03] text-left"
       aria-expanded={open}
     >
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{title}</span>
+      <span className="text-xs font-semibold uppercase tracking-wide text-muted">{title}</span>
       <span className={`text-muted text-xs transition-transform ${open ? 'rotate-90' : ''}`}>›</span>
     </button>
   );
@@ -147,7 +147,7 @@ export default function AppLayout({ user, onLogout }) {
                 <span className="flex items-center justify-between">
                   {item.label}
                   {item.to === '/tasks' && unreadCount > 0 && (
-                    <span className="badge-accent text-[10px] px-1.5 py-0 leading-4 min-w-[1.25rem] text-center">
+                    <span className="badge-accent text-xs px-1.5 py-0 leading-4 min-w-[1.25rem] text-center">
                       {unreadCount > 99 ? '99+' : unreadCount}
                     </span>
                   )}
@@ -157,7 +157,7 @@ export default function AppLayout({ user, onLogout }) {
 
           {user.role === 'admin' && (
             <>
-              <div className="mt-4 mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
+              <div className="mt-4 mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-muted">
                 Admin
               </div>
               <NavLink to="/admin" className={({ isActive }) => linkClass(isActive)}>
@@ -180,7 +180,7 @@ export default function AppLayout({ user, onLogout }) {
       </aside>
       <div className="flex-1 min-w-0">
         <header className="h-14 border-b border-line flex items-center justify-between pl-16 pr-6 lg:px-6">
-          <div className="text-sm text-muted hidden sm:block">Projects · Documents · Tasks</div>
+          <div className="text-sm text-muted hidden sm:block">Projects · Documents · Requests</div>
           <div className="badge-accent ml-auto">Linked workspace</div>
         </header>
         <main className="p-6">

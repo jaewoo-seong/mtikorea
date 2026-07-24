@@ -1,650 +1,475 @@
-import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
-import {
-  IconCheck,
-  IconX,
-  IconMessage,
-  IconClock,
-  IconFile,
-} from '../lib/icons';
 import { useToast } from '../components/Toast';
+import { IconPlus, IconSearch, IconPaperclip, IconMessage, IconClock } from '../lib/icons';
+import {
+  INBOXES,
+  KINDS,
+  kindLabel,
+  kindBadge,
+  stateChip,
+  priorityChip,
+  dueState,
+  relativeTime,
+} from '../lib/taskMeta';
+import { Avatar } from '../components/tasks/PeoplePicker';
+import RequestComposer from '../components/tasks/RequestComposer';
+import RequestDetail from '../components/tasks/RequestDetail';
+import DocumentPreviewModal from '../components/DocumentPreviewModal';
 
-function statusStyle(status) {
-  if (status === 'done') return 'badge bg-emerald-100 text-success';
-  if (status === 'in_progress') return 'badge-accent';
-  if (status === 'cancelled') return 'badge-neutral';
-  return 'badge-outline';
-}
-
-const COLUMNS = [
-  { key: 'open', label: 'Open' },
-  { key: 'in_progress', label: 'In Progress' },
-  { key: 'done', label: 'Done' },
-  { key: 'cancelled', label: 'Cancelled' },
-];
-
-function formatDue(dueAt) {
-  if (!dueAt) return null;
-  const d = new Date(dueAt);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-/** Mentionable handle for a user — matches the backend's username-or-email-prefix fallback. */
-function handleOf(u) {
-  return (u.username || u.email.split('@')[0]).toLowerCase();
-}
-
-/** Bold/colored @handle tokens inside a comment body. */
-function renderCommentBody(body) {
-  const parts = body.split(/(@[a-zA-Z0-9_-]+)/g);
-  return parts.map((part, i) =>
-    /^@[a-zA-Z0-9_-]+$/.test(part) ? (
-      <span key={i} className="font-semibold text-primary">{part}</span>
-    ) : (
-      <span key={i}>{part}</span>
-    )
-  );
-}
-
+/**
+ * Internal request inbox.
+ *
+ * Replaces the old four-column kanban: approval states don't map onto board
+ * columns, and the thing people actually need on opening this page is "what is
+ * waiting on me", which a board can't express. Layout is rail / list / detail,
+ * collapsing to list-then-overlay below xl.
+ */
 export default function TasksPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const toast = useToast();
+
   const [tasks, setTasks] = useState([]);
+  const [counts, setCounts] = useState({});
   const [clients, setClients] = useState([]);
   const [projects, setProjects] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [users, setUsers] = useState([]);
   const [me, setMe] = useState(null);
-  const [view, setView] = useState('board');
-  const [projectId, setProjectId] = useState(searchParams.get('projectId') || '');
-  const [clientId, setClientId] = useState(searchParams.get('clientId') || '');
-  const [form, setForm] = useState({
-    title: '',
-    description: '',
-    clientId: searchParams.get('clientId') || '',
-    projectId: searchParams.get('projectId') || '',
-    documentId: '',
-    assigneeId: '',
-    dueAt: '',
-    feedbackRequested: true,
-  });
-  const toast = useToast();
+  const [loading, setLoading] = useState(true);
 
-  // Drawer / task detail state
-  const [selectedId, setSelectedId] = useState(null);
-  const [comments, setComments] = useState([]);
-  const [commentText, setCommentText] = useState('');
-  const [commentsLoading, setCommentsLoading] = useState(false);
-  const [showRejectBox, setShowRejectBox] = useState(false);
-  const [rejectNote, setRejectNote] = useState('');
-  const [drawerBusy, setDrawerBusy] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState(null);
+  const [inbox, setInbox] = useState(searchParams.get('inbox') || 'awaiting_me');
+  const [kind, setKind] = useState('');
+  const [q, setQ] = useState('');
+  const [showResolved, setShowResolved] = useState(false);
+
+  const [selectedId, setSelectedId] = useState(searchParams.get('task') || null);
+  const [thread, setThread] = useState([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState(null);
 
   const selectedTask = tasks.find((t) => t.id === selectedId) || null;
 
-  async function load() {
-    const [t, c, p, d, u] = await Promise.all([
-      api.tasks.list({
-        projectId: projectId || undefined,
-        clientId: clientId || undefined,
-      }),
-      api.clients.list(),
-      api.projects.list(),
-      api.documents.list({ visibility: 'shared' }),
-      api.users.list(),
+  // --- data ---------------------------------------------------------------
+
+  const loadTasks = useCallback(async () => {
+    const [t, c] = await Promise.all([
+      api.tasks.list({ inbox, kind: kind || undefined, q: q || undefined }),
+      api.tasks.counts(),
     ]);
     setTasks(t.tasks);
-    setClients(c.clients);
-    setProjects(p.projects);
-    setDocuments(d.documents);
-    setUsers(u.users);
-  }
+    setCounts(c.counts || {});
+  }, [inbox, kind, q]);
 
   useEffect(() => {
-    api.me().then((r) => setMe(r.user)).catch(() => {});
+    Promise.all([
+      api.me(),
+      api.clients.list(),
+      api.projects.list(),
+      api.users.list(),
+      api.documents.list(),
+    ])
+      .then(([m, c, p, u, d]) => {
+        setMe(m.user);
+        setClients(c.clients);
+        setProjects(p.projects);
+        setUsers(u.users);
+        setDocuments(d.documents);
+      })
+      .catch((e) => toast.error(e.message));
   }, []);
 
   useEffect(() => {
-    const next = {};
-    if (clientId) next.clientId = clientId;
-    if (projectId) next.projectId = projectId;
-    setSearchParams(next, { replace: true });
-    load().catch((e) => toast.error(e.message));
-  }, [clientId, projectId]);
+    setLoading(true);
+    loadTasks()
+      .catch((e) => toast.error(e.message))
+      .finally(() => setLoading(false));
+  }, [loadTasks]);
 
-  // Live-ish board: poll the task list so status/assignment changes from teammates show up.
+  // Teammates act on these while you're looking at them, so keep the list warm.
   useEffect(() => {
-    const t = setInterval(() => load().catch(() => {}), 6000);
+    const t = setInterval(() => loadTasks().catch(() => {}), 8000);
     return () => clearInterval(t);
-  }, [clientId, projectId]);
+  }, [loadTasks]);
 
-  async function loadComments(taskId, { silent = false } = {}) {
-    if (!silent) setCommentsLoading(true);
+  useEffect(() => {
+    const next = {};
+    if (inbox !== 'awaiting_me') next.inbox = inbox;
+    if (selectedId) next.task = selectedId;
+    setSearchParams(next, { replace: true });
+  }, [inbox, selectedId]);
+
+  const loadThread = useCallback(async (taskId, { silent = false } = {}) => {
+    if (!taskId) return;
+    if (!silent) setThreadLoading(true);
     try {
-      const r = await api.tasks.comments.list(taskId);
-      setComments(r.comments);
+      const r = await api.tasks.thread(taskId);
+      setThread(r.items);
     } catch (e) {
       if (!silent) toast.error(e.message);
     } finally {
-      if (!silent) setCommentsLoading(false);
+      if (!silent) setThreadLoading(false);
     }
-  }
+  }, []);
 
-  // While the drawer is open, poll the thread so replies appear without reopening it.
   useEffect(() => {
-    if (!selectedId) return undefined;
-    const t = setInterval(() => loadComments(selectedId, { silent: true }), 4000);
+    if (!selectedId) {
+      setThread([]);
+      return undefined;
+    }
+    loadThread(selectedId);
+    const t = setInterval(() => loadThread(selectedId, { silent: true }), 5000);
     return () => clearInterval(t);
-  }, [selectedId]);
+  }, [selectedId, loadThread]);
 
-  function openTask(task) {
-    setSelectedId(task.id);
-    setShowRejectBox(false);
-    setRejectNote('');
-    setCommentText('');
-    setMentionQuery(null);
-    loadComments(task.id);
-  }
-
-  function closeDrawer() {
-    setSelectedId(null);
-    setComments([]);
-    setShowRejectBox(false);
-    setRejectNote('');
-    setMentionQuery(null);
-  }
-
-  function onCommentTextChange(e) {
-    const val = e.target.value;
-    setCommentText(val);
-    const cursor = e.target.selectionStart ?? val.length;
-    const match = /@([a-zA-Z0-9_-]*)$/.exec(val.slice(0, cursor));
-    setMentionQuery(match ? match[1].toLowerCase() : null);
-  }
-
-  function pickMention(u) {
-    setCommentText((prev) => prev.replace(/@([a-zA-Z0-9_-]*)$/, `@${handleOf(u)} `));
-    setMentionQuery(null);
-  }
-
-  const mentionSuggestions =
-    mentionQuery === null
-      ? []
-      : users
-          .filter(
-            (u) =>
-              handleOf(u).includes(mentionQuery) ||
-              (u.name || '').toLowerCase().includes(mentionQuery)
-          )
-          .slice(0, 5);
-
-  // ESC closes the drawer; lock body scroll while it's open.
+  // Esc closes the detail pane, matching the drawer behaviour elsewhere.
   useEffect(() => {
     if (!selectedId) return undefined;
     const onKey = (e) => {
-      if (e.key === 'Escape') closeDrawer();
+      if (e.key === 'Escape') setSelectedId(null);
     };
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [selectedId]);
 
-  async function create(e) {
-    e.preventDefault();
-    try {
-      await api.tasks.create({
-        title: form.title,
-        description: form.description,
-        clientId: form.clientId || null,
-        projectId: form.projectId || null,
-        documentId: form.documentId || null,
-        assigneeId: form.assigneeId || null,
-        dueAt: form.dueAt ? new Date(form.dueAt).toISOString() : null,
-        feedbackRequested: form.feedbackRequested,
-      });
-      setForm({
-        title: '',
-        description: '',
-        clientId: clientId || '',
-        projectId: projectId || '',
-        documentId: '',
-        assigneeId: '',
-        dueAt: '',
-        feedbackRequested: true,
-      });
-      toast.success('Feedback request sent');
-      await load();
-    } catch (err) {
-      toast.error(err.message);
-    }
+  // --- actions ------------------------------------------------------------
+
+  async function refreshOne(taskId) {
+    const { task } = await api.tasks.get(taskId);
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? task : t)));
   }
 
-  async function patch(id, body) {
+  async function guard(fn, successMsg) {
     try {
-      await api.tasks.update(id, body);
-      await load();
-    } catch (err) {
-      toast.error(err.message);
-    }
-  }
-
-  async function sendComment(e) {
-    e.preventDefault();
-    if (!selectedId || !commentText.trim()) return;
-    const text = commentText.trim();
-    setCommentText('');
-    setMentionQuery(null);
-    try {
-      await api.tasks.comments.add(selectedId, text);
-      await loadComments(selectedId);
-    } catch (e2) {
-      toast.error(e2.message);
-    }
-  }
-
-  async function approveTask() {
-    if (!selectedId) return;
-    setDrawerBusy(true);
-    try {
-      await api.tasks.approve(selectedId);
-      toast.success('Task approved');
-      await load();
-      await loadComments(selectedId);
+      await fn();
+      if (successMsg) toast.success(successMsg);
     } catch (e) {
       toast.error(e.message);
-    } finally {
-      setDrawerBusy(false);
+      throw e;
     }
   }
 
-  async function rejectTask(e) {
-    e.preventDefault();
-    if (!selectedId) return;
-    setDrawerBusy(true);
-    try {
-      await api.tasks.reject(selectedId, rejectNote.trim());
-      setShowRejectBox(false);
-      setRejectNote('');
-      toast.info('Task rejected — sent back to Open');
-      await load();
-      await loadComments(selectedId);
-    } catch (e2) {
-      toast.error(e2.message);
-    } finally {
-      setDrawerBusy(false);
-    }
+  async function createRequest(payload) {
+    await guard(async () => {
+      const { task } = await api.tasks.create(payload);
+      setComposerOpen(false);
+      // Land on the inbox that actually contains what was just raised — staying
+      // on "Needs my approval" would show an empty list right after a success
+      // toast, which reads as though nothing happened.
+      setInbox('mine');
+      setSelectedId(task.id);
+      // setInbox is a no-op when we were already on "mine", so refetch directly
+      // rather than relying on the filter effect firing.
+      await loadTasks();
+    }, 'Request sent');
   }
 
-  const canReview =
-    selectedTask &&
-    selectedTask.feedback_requested &&
-    selectedTask.status !== 'done' &&
-    selectedTask.status !== 'cancelled';
+  async function decide(decision, note) {
+    const labels = {
+      approved: 'Approved',
+      rejected: 'Rejected',
+      changes_requested: 'Changes requested',
+    };
+    await guard(async () => {
+      await api.tasks.decide(selectedId, decision, note);
+      await Promise.all([refreshOne(selectedId), loadThread(selectedId, { silent: true }), loadTasks()]);
+    }, labels[decision]);
+  }
+
+  async function comment(text) {
+    await guard(async () => {
+      await api.tasks.comments.add(selectedId, text);
+      await Promise.all([loadThread(selectedId, { silent: true }), refreshOne(selectedId)]);
+    });
+  }
+
+  async function addParticipants(userIds, role) {
+    await guard(
+      async () => {
+        await api.tasks.participants.add(selectedId, userIds, role);
+        await Promise.all([refreshOne(selectedId), loadThread(selectedId, { silent: true })]);
+      },
+      role === 'approver' ? 'Approver added' : 'Added to the thread'
+    );
+  }
+
+  async function removeParticipant(userId) {
+    await guard(async () => {
+      await api.tasks.participants.remove(selectedId, userId);
+      await Promise.all([refreshOne(selectedId), loadThread(selectedId, { silent: true })]);
+    });
+  }
+
+  async function addAttachments(documentIds) {
+    await guard(async () => {
+      await api.tasks.attachments.add(selectedId, documentIds);
+      await Promise.all([refreshOne(selectedId), loadThread(selectedId, { silent: true })]);
+    }, 'Documents attached');
+  }
+
+  async function removeAttachment(documentId) {
+    await guard(async () => {
+      await api.tasks.attachments.remove(selectedId, documentId);
+      await Promise.all([refreshOne(selectedId), loadThread(selectedId, { silent: true })]);
+    });
+  }
+
+  async function reopen() {
+    await guard(async () => {
+      await api.tasks.update(selectedId, { status: 'open' });
+      await Promise.all([refreshOne(selectedId), loadThread(selectedId, { silent: true }), loadTasks()]);
+    }, 'Reopened');
+  }
+
+  // --- derived ------------------------------------------------------------
+
+  const visible = useMemo(
+    () => (showResolved ? tasks : tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled')),
+    [tasks, showResolved]
+  );
+
+  const resolvedHidden = tasks.length - visible.length;
+
+  const detailProps = {
+    task: selectedTask,
+    thread,
+    threadLoading,
+    users,
+    clients,
+    documents,
+    me,
+    onClose: () => setSelectedId(null),
+    onDecide: decide,
+    onComment: comment,
+    onAddParticipants: addParticipants,
+    onRemoveParticipant: removeParticipant,
+    onAddAttachments: addAttachments,
+    onRemoveAttachment: removeAttachment,
+    onReopen: reopen,
+    onPreviewDocument: (id) => setPreviewDoc(documents.find((d) => d.id === id) || null),
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+    // The page owns the viewport and never scrolls itself — each column scrolls
+    // internally instead. Without this the conversation's message box ends up
+    // below the fold, so replying means scrolling the whole page first.
+    // 6.5rem = the app header (3.5rem) plus <main>'s p-6 top and bottom.
+    <div className="flex flex-col gap-5 h-[calc(100vh-6.5rem)] min-h-[520px]">
+      <div className="flex items-start justify-between gap-4 flex-wrap shrink-0">
         <div>
-          <h1 className="text-3xl">Tasks</h1>
+          <h1 className="text-3xl">Requests</h1>
           <p className="text-sm text-muted mt-1">
-            Internal feedback loops — assign a teammate, attach a shared document, request review.
+            Ask a teammate for an approval, an idea, or an answer — with the documents attached.
           </p>
         </div>
-        <div className="seg shrink-0">
-          <button
-            type="button"
-            className={`seg-opt ${view === 'board' ? 'seg-opt-active' : ''}`}
-            onClick={() => setView('board')}
-          >
-            Board
-          </button>
-          <button
-            type="button"
-            className={`seg-opt ${view === 'list' ? 'seg-opt-active' : ''}`}
-            onClick={() => setView('list')}
-          >
-            List
-          </button>
-        </div>
-      </div>
-
-      <div className="card p-4 grid md:grid-cols-3 gap-3">
-        <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-          <option value="">All projects</option>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
-        </select>
-        <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)}>
-          <option value="">All clients</option>
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <button type="button" className="btn-secondary" onClick={() => { setClientId(''); setProjectId(''); }}>
-          Clear filters
+        <button
+          type="button"
+          className="btn-primary inline-flex items-center gap-2 shrink-0"
+          onClick={() => setComposerOpen(true)}
+        >
+          <IconPlus width={15} height={15} /> New request
         </button>
       </div>
 
-      <form onSubmit={create} className="card p-5 grid md:grid-cols-2 gap-3">
-        <input className="input md:col-span-2" required placeholder="Ask for feedback…" value={form.title}
-          onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <textarea className="input md:col-span-2 min-h-[70px]" placeholder="Context / what to review"
-          value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        <select className="input" value={form.assigneeId}
-          onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}>
-          <option value="">Assign internal user…</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>{u.name || u.email}</option>
-          ))}
-        </select>
-        <select className="input" value={form.documentId}
-          onChange={(e) => setForm({ ...form, documentId: e.target.value })}>
-          <option value="">Attach shared document…</option>
-          {documents.map((d) => (
-            <option key={d.id} value={d.id}>{d.title}</option>
-          ))}
-        </select>
-        <select className="input" value={form.projectId}
-          onChange={(e) => setForm({ ...form, projectId: e.target.value })}>
-          <option value="">Link project…</option>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
-        </select>
-        <select className="input" value={form.clientId}
-          onChange={(e) => setForm({ ...form, clientId: e.target.value })}>
-          <option value="">Link client…</option>
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <input className="input" type="datetime-local" value={form.dueAt}
-          onChange={(e) => setForm({ ...form, dueAt: e.target.value })} />
-        <label className="flex items-center gap-2 text-sm text-muted">
-          <input type="checkbox" checked={form.feedbackRequested}
-            onChange={(e) => setForm({ ...form, feedbackRequested: e.target.checked })} />
-          Mark as feedback request
-        </label>
-        <button className="btn-primary md:col-span-2" type="submit">Send to teammate</button>
-      </form>
-
-      {view === 'board' ? (
-        <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
-          {COLUMNS.map((col) => {
-            const colTasks = tasks.filter((t) => t.status === col.key);
+      <div className="grid xl:grid-cols-[190px_minmax(0,1fr)_minmax(0,460px)] lg:grid-cols-[190px_minmax(0,1fr)] gap-5 items-start flex-1 min-h-0">
+        {/* --- Rail ------------------------------------------------- */}
+        <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-y-auto lg:h-full shrink-0 pb-1 lg:pb-0">
+          {INBOXES.map((box) => {
+            const active = inbox === box.key;
+            const n = counts[box.countKey] ?? 0;
             return (
-              <div key={col.key} className="space-y-3">
-                <div className="flex items-center justify-between px-1">
-                  <h2 className="font-semibold text-sm">{col.label}</h2>
-                  <span className="badge-neutral">{colTasks.length}</span>
-                </div>
-                <div className="space-y-3 min-h-[80px]">
-                  {colTasks.map((t) => (
-                    <article
-                      key={t.id}
-                      className="card p-3 flex flex-col gap-2 cursor-pointer hover:border-primary transition-colors min-w-0"
-                      onClick={() => openTask(t)}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="card-title text-[15px]">{t.title}</h3>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 text-[11px]">
-                        {t.feedback_requested && (
-                          <span className="badge-outline inline-flex items-center gap-1">
-                            <IconMessage width={10} height={10} /> Feedback
-                          </span>
-                        )}
-                        {t.assignee_name && <span className="badge-neutral">→ {t.assignee_name}</span>}
-                        {t.due_at && (
-                          <span className="badge-neutral inline-flex items-center gap-1">
-                            <IconClock width={10} height={10} /> {formatDue(t.due_at)}
-                          </span>
-                        )}
-                      </div>
-                      <select
-                        className="input text-xs mt-1"
-                        value={t.status}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => patch(t.id, { status: e.target.value })}
-                      >
-                        <option value="open">Open</option>
-                        <option value="in_progress">In Progress</option>
-                        <option value="done">Done</option>
-                        <option value="cancelled">Cancelled</option>
-                      </select>
-                    </article>
-                  ))}
-                  {!colTasks.length && (
-                    <div className="text-xs text-muted text-center py-4 border border-dashed border-line">
-                      No tasks
-                    </div>
-                  )}
-                </div>
-              </div>
+              <button
+                key={box.key}
+                type="button"
+                onClick={() => setInbox(box.key)}
+                className={`flex items-center justify-between gap-2 px-3 py-2 text-sm text-left border-l-2 shrink-0 whitespace-nowrap transition ${
+                  active
+                    ? 'border-primary text-primary font-medium bg-acc-100'
+                    : 'border-transparent text-muted hover:text-ink hover:bg-black/[0.03]'
+                }`}
+              >
+                {box.label}
+                {n > 0 && (
+                  <span
+                    className={`text-xs tabular-nums px-1.5 ${
+                      box.key === 'awaiting_me' && !active ? 'bg-primary text-canvas' : 'text-muted'
+                    }`}
+                  >
+                    {n}
+                  </span>
+                )}
+              </button>
             );
           })}
-        </div>
-      ) : (
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {tasks.map((t) => (
-            <article
-              key={t.id}
-              className="card p-4 flex flex-col gap-3 cursor-pointer hover:border-primary transition-colors min-w-0"
-              onClick={() => openTask(t)}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <h2 className="card-title">{t.title}</h2>
-                <span className={`capitalize shrink-0 ${statusStyle(t.status)}`}>{t.status.replace('_', ' ')}</span>
-              </div>
-              <p className="text-sm text-muted line-clamp-3">{t.description || 'No description'}</p>
-              <div className="flex flex-wrap gap-2 text-xs">
-                {t.feedback_requested && <span className="badge-outline">Feedback</span>}
-                {t.assignee_name && <span className="badge-neutral">→ {t.assignee_name}</span>}
-                {t.document_title && (
-                  <a
-                    className="badge-accent hover:underline"
-                    href={`/api/documents/${t.document_id}/download`}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {t.document_title}
-                  </a>
-                )}
-                {t.project_id && (
-                  <Link
-                    to={`/projects/${t.project_id}`}
-                    className="badge-accent hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {t.project_title || 'Project'}
-                  </Link>
-                )}
-                {t.client_id && (
-                  <Link
-                    to={`/clients/${t.client_id}`}
-                    className="badge bg-emerald-50 text-success hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {t.client_name}
-                  </Link>
-                )}
-              </div>
-              <select
-                className="input text-xs mt-auto"
-                value={t.status}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => patch(t.id, { status: e.target.value })}
-              >
-                <option value="open">open</option>
-                <option value="in_progress">in_progress</option>
-                <option value="done">done</option>
-                <option value="cancelled">cancelled</option>
-              </select>
-            </article>
-          ))}
-        </div>
-      )}
-      {!tasks.length && (
-        <div className="card p-10 text-center text-sm text-muted">No tasks for these filters</div>
-      )}
+        </nav>
 
-      {/* Slide-in drawer */}
-      {selectedTask && (
-        <div className="fixed inset-0 z-40 flex justify-end">
-          <div className="absolute inset-0 bg-ink/30" onClick={closeDrawer} />
-          <div className="relative w-full max-w-md bg-canvas h-full border-l border-line flex flex-col">
-            <div className="flex items-start justify-between gap-3 p-5 border-b border-line">
-              <div>
-                <h2 className="font-display text-xl font-semibold leading-snug">{selectedTask.title}</h2>
-                <span className={`capitalize mt-2 inline-block ${statusStyle(selectedTask.status)}`}>
-                  {selectedTask.status.replace('_', ' ')}
-                </span>
-              </div>
-              <button type="button" className="btn-ghost p-1.5 shrink-0" onClick={closeDrawer}>
-                <IconX width={16} height={16} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              <p className="text-sm text-ink whitespace-pre-wrap">
-                {selectedTask.description || 'No description'}
-              </p>
-
-              <div className="flex flex-wrap gap-1.5 text-xs">
-                {selectedTask.feedback_requested && (
-                  <span className="badge-outline inline-flex items-center gap-1">
-                    <IconMessage width={10} height={10} /> Feedback requested
-                  </span>
-                )}
-                {selectedTask.assignee_name && (
-                  <span className="badge-neutral">→ {selectedTask.assignee_name}</span>
-                )}
-                {selectedTask.due_at && (
-                  <span className="badge-neutral inline-flex items-center gap-1">
-                    <IconClock width={10} height={10} /> Due {formatDue(selectedTask.due_at)}
-                  </span>
-                )}
-                {selectedTask.document_title && (
-                  <a
-                    className="badge-accent hover:underline inline-flex items-center gap-1"
-                    href={`/api/documents/${selectedTask.document_id}/download`}
-                  >
-                    <IconFile width={10} height={10} /> {selectedTask.document_title}
-                  </a>
-                )}
-                {selectedTask.project_id && (
-                  <Link to={`/projects/${selectedTask.project_id}`} className="badge-accent hover:underline">
-                    {selectedTask.project_title || 'Project'}
-                  </Link>
-                )}
-                {selectedTask.client_id && (
-                  <Link to={`/clients/${selectedTask.client_id}`} className="badge bg-emerald-50 text-success hover:underline">
-                    {selectedTask.client_name}
-                  </Link>
-                )}
-              </div>
-
-              <select
-                className="input text-sm"
-                value={selectedTask.status}
-                onChange={(e) => patch(selectedTask.id, { status: e.target.value })}
-              >
-                <option value="open">Open</option>
-                <option value="in_progress">In Progress</option>
-                <option value="done">Done</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-
-              {canReview && (
-                <div className="card p-3 border-primary space-y-2">
-                  <p className="text-xs font-medium text-ink">This task is awaiting review.</p>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="btn-primary flex-1 inline-flex items-center justify-center gap-1.5 text-sm"
-                      disabled={drawerBusy}
-                      onClick={approveTask}
-                    >
-                      <IconCheck width={14} height={14} /> Approve
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-danger flex-1 inline-flex items-center justify-center gap-1.5 text-sm"
-                      disabled={drawerBusy}
-                      onClick={() => setShowRejectBox((v) => !v)}
-                    >
-                      <IconX width={14} height={14} /> Reject
-                    </button>
-                  </div>
-                  {showRejectBox && (
-                    <form onSubmit={rejectTask} className="space-y-2">
-                      <textarea
-                        className="input text-sm min-h-[60px]"
-                        placeholder="What needs to change?"
-                        value={rejectNote}
-                        onChange={(e) => setRejectNote(e.target.value)}
-                      />
-                      <button type="submit" className="btn-secondary text-sm w-full" disabled={drawerBusy}>
-                        Send rejection
-                      </button>
-                    </form>
-                  )}
-                </div>
-              )}
-
-              <div className="border-t border-line pt-3">
-                <h3 className="font-semibold text-sm mb-3 inline-flex items-center gap-1.5">
-                  <IconMessage width={13} height={13} /> Comments
-                </h3>
-                <div className="space-y-3 max-h-[280px] overflow-y-auto mb-3">
-                  {commentsLoading && <p className="text-xs text-muted">Loading…</p>}
-                  {comments.map((c) => (
-                    <div
-                      key={c.id}
-                      className={`border border-line px-3 py-2 text-sm whitespace-pre-wrap ${
-                        c.author_id === me?.id ? 'bg-acc-100 text-ink ml-8' : 'bg-surface text-ink mr-8'
-                      }`}
-                    >
-                      <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
-                        {c.author_name || 'Unknown'} · {new Date(c.created_at).toLocaleString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })}
-                      </div>
-                      {renderCommentBody(c.body)}
-                    </div>
-                  ))}
-                  {!commentsLoading && !comments.length && (
-                    <p className="text-sm text-muted">No comments yet. Start the thread below.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <form onSubmit={sendComment} className="relative flex gap-2 border-t border-line p-4 shrink-0">
-              {mentionSuggestions.length > 0 && (
-                <div className="absolute bottom-full left-4 right-4 mb-1 card border border-line overflow-hidden p-0 gap-0">
-                  {mentionSuggestions.map((u) => (
-                    <button
-                      type="button"
-                      key={u.id}
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-black/[0.03] flex items-center justify-between"
-                      onClick={() => pickMention(u)}
-                    >
-                      <span>{u.name || u.email}</span>
-                      <span className="text-xs text-muted font-mono">@{handleOf(u)}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <input
-                className="input"
-                placeholder="Write a comment… (@ to mention)"
-                value={commentText}
-                onChange={onCommentTextChange}
+        {/* --- List -------------------------------------------------- */}
+        <div className="min-w-0 h-full flex flex-col gap-3 min-h-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="relative flex-1 min-w-[180px]">
+              <IconSearch
+                width={14}
+                height={14}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
               />
-              <button className="btn-primary shrink-0" type="submit">Send</button>
-            </form>
+              <input
+                className="input pl-8"
+                placeholder="Search requests…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </div>
+            <select className="input w-auto" value={kind} onChange={(e) => setKind(e.target.value)}>
+              <option value="">All kinds</option>
+              {KINDS.map((k) => (
+                <option key={k.key} value={k.key}>
+                  {k.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-0.5">
+          {loading && <p className="text-sm text-muted px-1">Loading…</p>}
+
+          {!loading && !visible.length && (
+            <div className="card p-10 text-center">
+              <p className="text-sm text-ink font-medium">
+                {inbox === 'awaiting_me' ? 'Nothing is waiting on you.' : 'No requests here.'}
+              </p>
+              <p className="text-sm text-muted mt-1">
+                {inbox === 'awaiting_me'
+                  ? 'Approvals assigned to you will show up here.'
+                  : 'Raise one with “New request”.'}
+              </p>
+            </div>
+          )}
+
+          <ul className="space-y-2">
+            {visible.map((t) => {
+              const chip = stateChip(t);
+              const prio = priorityChip(t.priority);
+              const due = dueState(t.due_at);
+              const active = t.id === selectedId;
+              const approvers = (t.participants || []).filter((p) => p.role === 'approver');
+              return (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(t.id)}
+                    className={`card w-full text-left p-3 gap-2 transition ${
+                      active ? 'border-primary bg-acc-100/50' : 'hover:border-neutral-400'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                          <span className={kindBadge(t.kind)}>{kindLabel(t.kind)}</span>
+                          <span className={chip.className}>{chip.label}</span>
+                          {prio && <span className={prio.className}>{prio.label}</span>}
+                        </div>
+                        <h3 className="card-title truncate">{t.title}</h3>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {approvers.slice(0, 3).map((p) => (
+                          <Avatar key={p.user_id} name={p.name} size={24} title={`${p.name} — approver`} />
+                        ))}
+                        {approvers.length > 3 && (
+                          <span className="text-xs text-muted">+{approvers.length - 3}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+                      <span>{t.owner_name || 'Unknown'}</span>
+                      <span aria-hidden>·</span>
+                      <span>{relativeTime(t.updated_at)}</span>
+                      {t.attachments?.length > 0 && (
+                        <span className="inline-flex items-center gap-1">
+                          <IconPaperclip width={12} height={12} /> {t.attachments.length}
+                        </span>
+                      )}
+                      {t.comment_count > 0 && (
+                        <span className="inline-flex items-center gap-1">
+                          <IconMessage width={12} height={12} /> {t.comment_count}
+                        </span>
+                      )}
+                      {due && (
+                        <span className={`inline-flex items-center gap-1 ${due.className}`}>
+                          <IconClock width={12} height={12} /> {due.label}
+                        </span>
+                      )}
+                      {t.unread_count > 0 && <span className="badge-accent ml-auto">{t.unread_count} new</span>}
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          {resolvedHidden > 0 && !showResolved && (
+            <button
+              type="button"
+              className="btn-ghost text-xs w-full justify-center"
+              onClick={() => setShowResolved(true)}
+            >
+              Show {resolvedHidden} resolved
+            </button>
+          )}
+          {showResolved && (
+            <button
+              type="button"
+              className="btn-ghost text-xs w-full justify-center"
+              onClick={() => setShowResolved(false)}
+            >
+              Hide resolved
+            </button>
+          )}
           </div>
         </div>
+
+        {/* --- Detail ------------------------------------------------ */}
+        {selectedTask && (
+          <>
+            {/* xl and up: a third column filling the row's full height. */}
+            <div className="hidden xl:block h-full min-h-0 border border-line">
+              <RequestDetail {...detailProps} />
+            </div>
+
+            {/* Below xl: the same pane as a right-hand overlay. */}
+            <div className="xl:hidden fixed inset-0 z-40 flex justify-end">
+              <div className="absolute inset-0 bg-ink/30" onClick={() => setSelectedId(null)} />
+              <div className="relative w-full max-w-lg h-full">
+                <RequestDetail {...detailProps} />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {composerOpen && (
+        <RequestComposer
+          users={users}
+          clients={clients}
+          projects={projects}
+          documents={documents}
+          me={me}
+          onCancel={() => setComposerOpen(false)}
+          onCreate={createRequest}
+        />
+      )}
+
+      {previewDoc && (
+        <DocumentPreviewModal
+          document={previewDoc}
+          siblings={(selectedTask?.attachments || [])
+            .map((a) => documents.find((d) => d.id === a.document_id))
+            .filter(Boolean)}
+          onClose={() => setPreviewDoc(null)}
+          onNavigate={(d) => setPreviewDoc(d)}
+        />
       )}
     </div>
   );

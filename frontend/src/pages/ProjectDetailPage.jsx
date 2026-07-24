@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { useToast } from '../components/Toast';
 import DocumentPreviewModal from '../components/DocumentPreviewModal';
 import ConfirmButton from '../components/ConfirmButton';
+import { stateChip } from '../lib/taskMeta';
 import {
   PIPELINE,
   buildDiagnostics,
@@ -81,7 +82,7 @@ function ProgressBar({ value, live, compact }) {
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="text-[11px] font-mono text-muted shrink-0">{pct}%</span>
+        <span className="text-xs font-mono text-muted shrink-0">{pct}%</span>
       </div>
     );
   }
@@ -172,7 +173,7 @@ function SubAgentCard({ e }) {
           {isErr && <IconAlert width={12} height={12} className="text-danger" />}
           <span className="capitalize">{e.role || e.action?.replace(/_/g, ' ') || 'agent'}</span>
         </div>
-        {e.model && <div className="font-mono text-[10px] text-muted mt-0.5 truncate">{e.model}</div>}
+        {e.model && <div className="font-mono text-xs text-muted mt-0.5 truncate">{e.model}</div>}
         <div className="text-muted mt-1">
           {isRotate
             ? e.action === 'auth_fail_rotate'
@@ -185,11 +186,11 @@ function SubAgentCard({ e }) {
                 : 'failed'}
         </div>
         {canExpand && (
-          <div className="text-[10px] text-primary mt-1">{open ? 'Hide detail ▲' : 'Show detail ▼'}</div>
+          <div className="text-xs text-primary mt-1">{open ? 'Hide detail ▲' : 'Show detail ▼'}</div>
         )}
       </button>
       {open && body && (
-        <pre className="mt-2 whitespace-pre-wrap break-words text-[10px] bg-slate-50 p-2 rounded max-h-48 overflow-y-auto border border-line">
+        <pre className="mt-2 whitespace-pre-wrap break-words text-xs bg-neutral-100 p-2 rounded max-h-48 overflow-y-auto border border-line">
           {body}
         </pre>
       )}
@@ -534,7 +535,7 @@ export default function ProjectDetailPage() {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">
           Approved <span className="font-mono normal-case">({documents.length})</span>
         </h3>
-        <p className="text-[11px] text-muted mb-2">Also listed under Documents for the whole org.</p>
+        <p className="text-xs text-muted mb-2">Also listed under Documents for the whole org.</p>
         <div className="space-y-2 max-h-[22rem] overflow-y-auto">
           {documents.map((d) => (
             <div key={d.id} className="border border-line px-3 py-2 hover:bg-black/[0.02] text-sm">
@@ -576,7 +577,7 @@ export default function ProjectDetailPage() {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">
           Rejected <span className="font-mono normal-case">({rejectedDocuments.length})</span>
         </h3>
-        <p className="text-[11px] text-muted mb-2">
+        <p className="text-xs text-muted mb-2">
           Hidden from Documents. Still on this project — you can approve later if needed.
         </p>
         <div className="space-y-2 max-h-[18rem] overflow-y-auto">
@@ -663,7 +664,7 @@ export default function ProjectDetailPage() {
               <button
                 type="button"
                 onClick={() => toggleCycle(group.id)}
-                className="w-full flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted border border-line px-2.5 py-1.5 hover:bg-black/[0.03]"
+                className="w-full flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted border border-line px-2.5 py-1.5 hover:bg-black/[0.03]"
               >
                 <span>
                   Cycle {group.cycle} · {group.items.length} event{group.items.length === 1 ? '' : 's'}
@@ -692,7 +693,7 @@ export default function ProjectDetailPage() {
                           </span>
                           <span className="font-semibold">{stageLabel(e.stage)}</span>
                           <span className="text-muted">{e.action || e.status}</span>
-                          {e.model && <span className="font-mono text-[10px] text-muted">{e.model}</span>}
+                          {e.model && <span className="font-mono text-xs text-muted">{e.model}</span>}
                           {e.role && <span className="badge-neutral">{e.role}</span>}
                           <span className="text-muted ml-auto">
                             {new Date(e.created_at).toLocaleString()}
@@ -708,21 +709,21 @@ export default function ProjectDetailPage() {
                         <div className="mt-2 space-y-2 border-t border-line pt-2">
                           {e.detail && (
                             <div>
-                              <div className="text-[10px] uppercase text-muted mb-0.5">Detail</div>
-                              <pre className="whitespace-pre-wrap break-words text-[11px] bg-slate-50 p-2 rounded max-h-64 overflow-y-auto">
+                              <div className="text-xs uppercase text-muted mb-0.5">Detail</div>
+                              <pre className="whitespace-pre-wrap break-words text-xs bg-neutral-100 p-2 rounded max-h-64 overflow-y-auto">
                                 {e.detail}
                               </pre>
                             </div>
                           )}
                           {e.error_full && (
                             <div>
-                              <div className="text-[10px] uppercase text-danger mb-0.5">Full error</div>
-                              <pre className="whitespace-pre-wrap break-words text-[11px] bg-red-100/50 p-2 rounded max-h-80 overflow-y-auto text-danger">
+                              <div className="text-xs uppercase text-danger mb-0.5">Full error</div>
+                              <pre className="whitespace-pre-wrap break-words text-xs bg-red-100/50 p-2 rounded max-h-80 overflow-y-auto text-danger">
                                 {e.error_full}
                               </pre>
                               <button
                                 type="button"
-                                className="btn-ghost text-[10px] mt-1"
+                                className="btn-ghost text-xs mt-1"
                                 onClick={() => navigator.clipboard?.writeText(e.error_full)}
                               >
                                 Copy error
@@ -753,7 +754,7 @@ export default function ProjectDetailPage() {
       <div className="card p-4 flex flex-col min-h-[320px] max-h-[calc(100vh-8rem)]">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold text-sm">Nudge</h2>
-          {live && <span className="badge-accent animate-pulse text-[10px]">live</span>}
+          {live && <span className="badge-accent animate-pulse text-xs">live</span>}
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto mb-3 min-h-0">
           {messages.map((m) => (
@@ -767,10 +768,10 @@ export default function ProjectDetailPage() {
                     : 'border-line text-ink mr-4'
               }`}
             >
-              <div className="text-[10px] uppercase tracking-wide text-muted mb-0.5">{m.role}</div>
+              <div className="text-xs uppercase tracking-wide text-muted mb-0.5">{m.role}</div>
               {m.content}
               {m.document_id && (
-                <div className="text-[10px] text-primary mt-1">Doc: {m.document_title || m.document_id}</div>
+                <div className="text-xs text-primary mt-1">Doc: {m.document_title || m.document_id}</div>
               )}
             </div>
           ))}
@@ -802,7 +803,7 @@ export default function ProjectDetailPage() {
             ← Projects
           </Link>
           <h1 className="font-display text-xl font-semibold truncate min-w-0 flex-1">{project.title}</h1>
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px] shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs shrink-0">
             <span className={`inline-flex items-center gap-1 font-semibold ${headerToneClasses.badge}`}>
               {live && <IconLoader width={11} height={11} />}
               {stageLabel(activeStage)}
@@ -824,7 +825,7 @@ export default function ProjectDetailPage() {
 
         <div className="flex items-center gap-3 flex-wrap">
           <ProgressBar value={project.progressPct ?? project.progress_pct} live={live} compact />
-          <div className="flex items-center gap-3 text-[11px] text-muted shrink-0">
+          <div className="flex items-center gap-3 text-xs text-muted shrink-0">
             {timeLeft && (
               <span className="inline-flex items-center gap-1">
                 <IconClock width={11} height={11} />
@@ -934,7 +935,7 @@ export default function ProjectDetailPage() {
                           title={`Filter timeline to ${s.label}`}
                         >
                           <span
-                            className={`flex items-center justify-center h-7 w-7 rounded-full border-2 text-[11px] font-semibold shrink-0 ${
+                            className={`flex items-center justify-center h-7 w-7 rounded-full border-2 text-xs font-semibold shrink-0 ${
                               current
                                 ? 'border-primary bg-acc-100 text-primary'
                                 : done
@@ -1022,7 +1023,7 @@ export default function ProjectDetailPage() {
                             </p>
                           </button>
                           {open && (e.detail || e.error_full) && (
-                            <pre className="mt-1 whitespace-pre-wrap break-words text-[10px] bg-slate-50 p-2 rounded max-h-40 overflow-y-auto">
+                            <pre className="mt-1 whitespace-pre-wrap break-words text-xs bg-neutral-100 p-2 rounded max-h-40 overflow-y-auto">
                               {e.detail || e.error_full}
                             </pre>
                           )}
@@ -1089,7 +1090,7 @@ export default function ProjectDetailPage() {
                       </div>
                     );
                   })}
-                  <div className="border-t border-line pt-1.5 grid sm:grid-cols-2 gap-1 text-[10px] text-muted">
+                  <div className="border-t border-line pt-1.5 grid sm:grid-cols-2 gap-1 text-xs text-muted">
                     <div>
                       Subs:{' '}
                       {cp.sub_ok != null
@@ -1222,7 +1223,7 @@ export default function ProjectDetailPage() {
                     disabled={live}
                   />
                   {(schedule.allottedHours !== '' || schedule.dueAt !== '') && (
-                    <span className="text-[11px] text-muted mt-1 block">
+                    <span className="text-xs text-muted mt-1 block">
                       Legacy: {schedule.allottedHours !== '' ? `${schedule.allottedHours}h allotted` : ''}
                       {schedule.allottedHours !== '' && schedule.dueAt !== '' ? ' · ' : ''}
                       {schedule.dueAt !== '' ? `due ${new Date(schedule.dueAt).toLocaleString()}` : ''}
@@ -1276,15 +1277,27 @@ export default function ProjectDetailPage() {
                   </form>
                 </div>
                 <div className="grid md:grid-cols-2 gap-3">
-                  {tasks.map((t) => (
-                    <div key={t.id} className="border border-line p-3">
-                      <div className="flex justify-between gap-2">
-                        <div className="font-medium text-sm">{t.title}</div>
-                        <span className="badge-outline text-xs">{t.status}</span>
-                      </div>
-                      <div className="text-xs text-muted mt-1">{t.assignee_name || 'Unassigned'}</div>
-                    </div>
-                  ))}
+                  {tasks.map((t) => {
+                    const chip = stateChip(t);
+                    const approvers = (t.participants || []).filter((p) => p.role === 'approver');
+                    return (
+                      <Link
+                        key={t.id}
+                        to={`/tasks?task=${t.id}`}
+                        className="border border-line p-3 block hover:border-primary transition-colors"
+                      >
+                        <div className="flex justify-between gap-2">
+                          <div className="font-medium text-sm">{t.title}</div>
+                          <span className={`${chip.className} shrink-0`}>{chip.label}</span>
+                        </div>
+                        <div className="text-xs text-muted mt-1">
+                          {approvers.length
+                            ? approvers.map((p) => p.name).join(', ')
+                            : 'No approver assigned'}
+                        </div>
+                      </Link>
+                    );
+                  })}
                   {!tasks.length && (
                     <p className="text-sm text-muted md:col-span-2">No human tasks yet — agent work is separate</p>
                   )}
@@ -1328,7 +1341,7 @@ export default function ProjectDetailPage() {
                 <div className="space-y-3 max-h-64 overflow-y-auto">
                   {[...logs].reverse().slice(0, 40).map((l) => (
                     <div key={l.id} className="pl-3 border-l-2 border-primary/30">
-                      <div className="text-[11px] text-muted font-mono">
+                      <div className="text-xs text-muted font-mono">
                         #{l.step_number} · {l.action}
                       </div>
                       <div className="text-sm whitespace-pre-wrap line-clamp-4">{l.detail}</div>

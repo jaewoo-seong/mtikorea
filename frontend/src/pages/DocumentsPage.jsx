@@ -65,7 +65,7 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
       >
         <button
           type="button"
-          className={`w-4 shrink-0 text-[11px] ${hasChildren ? 'text-muted' : 'invisible'}`}
+          className={`w-4 shrink-0 text-xs ${hasChildren ? 'text-muted' : 'invisible'}`}
           onClick={(e) => {
             e.stopPropagation();
             setExpanded((v) => !v);
@@ -102,7 +102,7 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
             {folder.name}
           </span>
         )}
-        <span className="text-[10px] font-mono text-muted tabular-nums shrink-0 opacity-70 group-hover:opacity-100">
+        <span className="text-xs font-mono text-muted tabular-nums shrink-0">
           {folder.document_count}
         </span>
         <div className="hidden group-hover:flex items-center shrink-0">
@@ -441,7 +441,7 @@ export default function DocumentsPage() {
   const folderPanel = (
     <aside className="min-w-0 h-full flex flex-col bg-canvas">
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-line shrink-0">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Folders</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Folders</span>
         <button
           type="button"
           title="New folder"
@@ -489,7 +489,7 @@ export default function DocumentsPage() {
         </button>
         {folderTree.length > 0 && (
           <div className="mt-2 pt-2 border-t border-line">
-            <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Library</div>
+            <div className="px-3 py-1 text-xs font-semibold uppercase tracking-wide text-muted">Library</div>
             {folderTree.map((f) => (
               <FolderRow
                 key={f.id}
@@ -617,7 +617,7 @@ export default function DocumentsPage() {
                 Clear
               </button>
               {storageUsage && (
-                <div className="flex items-center gap-2 text-[11px] text-muted shrink-0 pl-2 border-l border-line">
+                <div className="flex items-center gap-2 text-xs text-muted shrink-0 pl-2 border-l border-line">
                   <span className="font-mono whitespace-nowrap">
                     {formatBytes(storageUsage.usedBytes)} / {formatBytes(storageUsage.limitBytes)}
                   </span>
@@ -701,7 +701,7 @@ export default function DocumentsPage() {
             {documents !== null && documents.length > 0 && (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted sticky top-0 bg-canvas">
+                  <tr className="border-b border-line-strong text-left text-xs font-semibold uppercase tracking-wide text-neutral-800 sticky top-0 bg-neutral-300">
                     <th className="px-3 py-2 font-semibold">Title</th>
                     <th className="px-3 py-2 font-semibold w-20">Type</th>
                     <th className="px-3 py-2 font-semibold hidden md:table-cell">Project</th>
@@ -739,7 +739,7 @@ export default function DocumentsPage() {
                         <td className="px-3 py-2.5 min-w-0">
                           <div className="font-medium truncate max-w-[280px]">{d.title}</div>
                           {d.filename && (
-                            <div className="text-[11px] text-muted truncate max-w-[280px]">{d.filename}</div>
+                            <div className="text-xs text-muted truncate max-w-[280px]">{d.filename}</div>
                           )}
                         </td>
                         <td className="px-3 py-2.5">

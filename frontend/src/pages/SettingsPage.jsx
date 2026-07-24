@@ -13,9 +13,9 @@ function pct(used, total) {
 function Tile({ label, value, sub }) {
   return (
     <div className="border border-line bg-surface p-3">
-      <div className="text-[11px] uppercase tracking-wide text-muted">{label}</div>
+      <div className="text-xs uppercase tracking-wide text-muted">{label}</div>
       <div className="font-mono mt-1 text-lg">{value}</div>
-      {sub != null && <div className="text-[11px] text-muted mt-0.5">{sub}</div>}
+      {sub != null && <div className="text-xs text-muted mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -31,7 +31,7 @@ function StatusList({ title, rows, labelKey = 'status' }) {
           <div key={r[labelKey] || 'unknown'} className="flex items-center justify-between text-sm">
             <span className="capitalize text-muted">{r[labelKey] || 'unknown'}</span>
             <span className="font-mono">
-              {r.count} <span className="text-[11px] text-muted">({pct(r.count, total)}%)</span>
+              {r.count} <span className="text-xs text-muted">({pct(r.count, total)}%)</span>
             </span>
           </div>
         ))}
@@ -213,7 +213,7 @@ export default function SettingsPage({ user }) {
             }
           />
           <Tile label="Documents" value={docsTotal} />
-          <Tile label="Tasks" value={tasksTotal} />
+          <Tile label="Requests" value={tasksTotal} />
           <Tile label="Active users" value={users.activeCount} />
         </div>
         {tokens.legacyCappedCount > 0 && (
@@ -340,10 +340,10 @@ export default function SettingsPage({ user }) {
                 {a.summary && <div className="text-xs text-muted mt-0.5 truncate">{a.summary}</div>}
               </div>
               <div className="text-right shrink-0">
-                <div className="text-[11px] text-muted">{new Date(a.created_at).toLocaleString()}</div>
-                {a.model && <div className="text-[11px] font-mono text-muted">{a.model}</div>}
+                <div className="text-xs text-muted">{new Date(a.created_at).toLocaleString()}</div>
+                {a.model && <div className="text-xs font-mono text-muted">{a.model}</div>}
                 {a.tokens_used != null && (
-                  <div className="text-[11px] font-mono">{Number(a.tokens_used).toLocaleString()} tok</div>
+                  <div className="text-xs font-mono">{Number(a.tokens_used).toLocaleString()} tok</div>
                 )}
               </div>
             </div>

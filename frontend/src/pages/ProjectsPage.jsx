@@ -150,7 +150,7 @@ export default function ProjectsPage() {
           />
         </div>
         {!loading && (
-          <div className="flex items-center gap-1.5 text-[11px] text-muted">
+          <div className="flex items-center gap-1.5 text-xs text-muted">
             {projects.some((p) => p.status === 'running') ? (
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/50" />
@@ -204,29 +204,29 @@ export default function ProjectsPage() {
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2 flex-wrap">
                     <StatusTag status={p.status} />
-                    {stage && <span className="text-[11px] text-muted">{stageLabel(stage)}</span>}
+                    {stage && <span className="text-xs text-muted">{stageLabel(stage)}</span>}
                     {pending > 0 && (
-                      <span className="badge-outline text-[10px]">
+                      <span className="badge-outline text-xs">
                         {pending} pending
                       </span>
                     )}
                   </div>
-                  <span className="text-[11px] text-muted shrink-0">{dateLabel(p.created_at)}</span>
+                  <span className="text-xs text-muted shrink-0">{dateLabel(p.created_at)}</span>
                 </div>
                 <h2 className="card-title mt-1.5 truncate group-hover:text-primary transition">{p.title}</h2>
                 <p className="card-body line-clamp-2 min-h-[2.2rem]">{p.goal || 'No goal set'}</p>
 
-                <div className="flex items-center justify-between text-[11px] text-muted">
+                <div className="flex items-center justify-between text-xs text-muted">
                   <span>{p.client_name || 'No client'}</span>
                   <span>{p.creator_name || 'You'}</span>
                 </div>
 
                 {p.stop_reason && (
-                  <div className="text-[11px] text-danger line-clamp-1">{stopLabel(p.stop_reason)}</div>
+                  <div className="text-xs text-danger line-clamp-1">{stopLabel(p.stop_reason)}</div>
                 )}
 
                 <div className="pt-2 border-t border-line space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
+                  <div className="flex items-center justify-between text-xs">
                     <span className="text-muted inline-flex items-center gap-1">
                       <IconClock width={10} height={10} /> Time
                     </span>
@@ -246,7 +246,7 @@ export default function ProjectsPage() {
                       />
                     </div>
                   )}
-                  <div className="flex items-center justify-between text-[11px] pt-0.5 text-muted">
+                  <div className="flex items-center justify-between text-xs pt-0.5 text-muted">
                     <span>Tokens</span>
                     <span className="font-mono">
                       {Number(p.tokens_used || 0).toLocaleString()}
