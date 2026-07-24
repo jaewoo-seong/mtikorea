@@ -4,7 +4,6 @@ import { api } from '../lib/api';
 import DocumentPreviewModal from '../components/DocumentPreviewModal';
 import DocumentComposeModal from '../components/DocumentComposeModal';
 import ConfirmButton from '../components/ConfirmButton';
-import BlueprintCorners from '../components/BlueprintCorners';
 import { useToast } from '../components/Toast';
 import { IconSearch } from '../lib/icons';
 
@@ -24,12 +23,19 @@ function buildFolderTree(folders) {
   return attach('root');
 }
 
+function folderItemClass(active, dragOver) {
+  if (dragOver) return 'border-l-2 border-primary bg-acc-100 text-primary';
+  if (active) return 'border-l-2 border-primary text-primary bg-primary/[0.06]';
+  return 'border-l-2 border-transparent text-muted hover:text-ink hover:bg-black/[0.03] hover:border-line';
+}
+
 function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, onAddChild, onDropDoc }) {
   const [expanded, setExpanded] = useState(true);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(folder.name);
   const [dragOver, setDragOver] = useState(false);
   const hasChildren = folder.children.length > 0;
+  const active = selectedId === folder.id;
 
   function commitRename() {
     setEditing(false);
@@ -41,14 +47,8 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
   return (
     <div>
       <div
-        className={`group flex items-center gap-1 px-1.5 py-1 text-sm cursor-pointer ${
-          dragOver
-            ? 'bg-acc-100 outline outline-1 outline-primary'
-            : selectedId === folder.id
-              ? 'bg-acc-100 text-primary'
-              : 'hover:bg-black/[0.03]'
-        }`}
-        style={{ paddingLeft: `${depth * 14 + 6}px` }}
+        className={`group flex items-center gap-1.5 px-2 py-1.5 text-sm cursor-pointer transition ${folderItemClass(active, dragOver)}`}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => !editing && onSelect(folder.id)}
         onDragOver={(e) => e.preventDefault()}
         onDragEnter={(e) => {
@@ -65,18 +65,19 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
       >
         <button
           type="button"
-          className="w-4 shrink-0 text-muted"
+          className={`w-4 shrink-0 text-[11px] ${hasChildren ? 'text-muted' : 'invisible'}`}
           onClick={(e) => {
             e.stopPropagation();
             setExpanded((v) => !v);
           }}
+          aria-label={expanded ? 'Collapse' : 'Expand'}
         >
-          {hasChildren ? (expanded ? '▾' : '▸') : ''}
+          <span className={`inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}>›</span>
         </button>
         {editing ? (
           <input
             autoFocus
-            className="input text-xs py-0.5 px-1 flex-1 min-w-0"
+            className="input text-xs py-0.5 px-1.5 flex-1 min-w-0 h-7"
             value={name}
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => setName(e.target.value)}
@@ -91,21 +92,24 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
           />
         ) : (
           <span
-            className="truncate flex-1 min-w-0"
+            className={`truncate flex-1 min-w-0 font-medium ${active ? 'text-primary' : ''}`}
             onDoubleClick={(e) => {
               e.stopPropagation();
               setEditing(true);
             }}
+            title="Double-click to rename"
           >
             {folder.name}
           </span>
         )}
-        <span className="text-[11px] text-muted shrink-0">{folder.document_count}</span>
-        <div className="hidden group-hover:flex items-center gap-1 shrink-0">
+        <span className="text-[10px] font-mono text-muted tabular-nums shrink-0 opacity-70 group-hover:opacity-100">
+          {folder.document_count}
+        </span>
+        <div className="hidden group-hover:flex items-center shrink-0">
           <button
             type="button"
             title="New subfolder"
-            className="text-muted hover:text-primary px-1"
+            className="text-muted hover:text-primary px-1 text-xs leading-none"
             onClick={(e) => {
               e.stopPropagation();
               onAddChild(folder.id);
@@ -113,13 +117,13 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
           >
             +
           </button>
-          <ConfirmButton onConfirm={() => onDelete(folder.id)} className="text-muted hover:text-danger px-1">
+          <ConfirmButton onConfirm={() => onDelete(folder.id)} className="text-muted hover:text-danger px-1 text-xs leading-none">
             ×
           </ConfirmButton>
         </div>
       </div>
       {expanded && hasChildren && (
-        <div>
+        <div className="border-l border-line/60 ml-3">
           {folder.children.map((c) => (
             <FolderRow
               key={c.id}
@@ -435,79 +439,82 @@ export default function DocumentsPage() {
   }
 
   const folderPanel = (
-    <div className="card blueprint p-3 min-w-0 h-full">
-      <BlueprintCorners />
-      <div className="flex items-center justify-between px-1.5 mb-1">
-        <span className="card-kicker">Folders</span>
+    <aside className="min-w-0 h-full flex flex-col bg-canvas">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-line shrink-0">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Folders</span>
         <button
           type="button"
           title="New folder"
-          className="btn-ghost text-xs px-1"
+          className="btn-ghost text-xs py-0.5 px-1.5"
           onClick={() => createFolder(folderFilter !== 'all' && folderFilter !== 'root' ? folderFilter : null)}
         >
           + New
         </button>
       </div>
-      <div
-        className={`px-1.5 py-1 text-sm cursor-pointer ${
-          folderFilter === 'all' ? 'bg-acc-100 text-primary' : 'hover:bg-black/[0.03]'
-        }`}
-        onClick={() => {
-          setFolderFilter('all');
-          setFoldersOpen(false);
-        }}
-      >
-        All documents
+      <div className="flex-1 overflow-y-auto py-1">
+        <button
+          type="button"
+          className={`w-full text-left px-3 py-1.5 text-sm font-medium transition ${folderItemClass(folderFilter === 'all', false)}`}
+          onClick={() => {
+            setFolderFilter('all');
+            setFoldersOpen(false);
+          }}
+        >
+          All documents
+        </button>
+        <button
+          type="button"
+          className={`w-full text-left px-3 py-1.5 text-sm font-medium transition ${folderItemClass(
+            folderFilter === 'root',
+            unfiledDragOver
+          )}`}
+          onClick={() => {
+            setFolderFilter('root');
+            setFoldersOpen(false);
+          }}
+          onDragOver={(e) => e.preventDefault()}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            setUnfiledDragOver(true);
+          }}
+          onDragLeave={() => setUnfiledDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setUnfiledDragOver(false);
+            const docId = e.dataTransfer.getData('text/plain');
+            if (docId) dropDocOnFolder(docId, null);
+          }}
+        >
+          Unfiled
+        </button>
+        {folderTree.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-line">
+            <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Library</div>
+            {folderTree.map((f) => (
+              <FolderRow
+                key={f.id}
+                folder={f}
+                depth={0}
+                selectedId={folderFilter}
+                onSelect={(id) => {
+                  setFolderFilter(id);
+                  setFoldersOpen(false);
+                }}
+                onRename={renameFolder}
+                onDelete={deleteFolder}
+                onAddChild={createFolder}
+                onDropDoc={dropDocOnFolder}
+              />
+            ))}
+          </div>
+        )}
+        {!folders.length && (
+          <p className="text-xs text-muted px-3 py-3 leading-relaxed">
+            No folders yet. Create one, then drag documents onto a folder to file them.
+          </p>
+        )}
       </div>
-      <div
-        className={`px-1.5 py-1 text-sm cursor-pointer ${
-          unfiledDragOver
-            ? 'bg-acc-100 outline outline-1 outline-primary'
-            : folderFilter === 'root'
-              ? 'bg-acc-100 text-primary'
-              : 'hover:bg-black/[0.03]'
-        }`}
-        onClick={() => {
-          setFolderFilter('root');
-          setFoldersOpen(false);
-        }}
-        onDragOver={(e) => e.preventDefault()}
-        onDragEnter={(e) => {
-          e.preventDefault();
-          setUnfiledDragOver(true);
-        }}
-        onDragLeave={() => setUnfiledDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setUnfiledDragOver(false);
-          const docId = e.dataTransfer.getData('text/plain');
-          if (docId) dropDocOnFolder(docId, null);
-        }}
-      >
-        Unfiled
-      </div>
-      <div className="mt-1">
-        {folderTree.map((f) => (
-          <FolderRow
-            key={f.id}
-            folder={f}
-            depth={0}
-            selectedId={folderFilter}
-            onSelect={(id) => {
-              setFolderFilter(id);
-              setFoldersOpen(false);
-            }}
-            onRename={renameFolder}
-            onDelete={deleteFolder}
-            onAddChild={createFolder}
-            onDropDoc={dropDocOnFolder}
-          />
-        ))}
-      </div>
-      {!folders.length && (
-        <p className="text-xs text-muted px-1.5 mt-1">No folders yet — organize documents like a Finder.</p>
-      )}
-    </div>
+    </aside>
   );
 
   return (
@@ -550,104 +557,104 @@ export default function DocumentsPage() {
         <button type="button" className="btn-secondary text-sm w-full" onClick={() => setFoldersOpen((v) => !v)}>
           {foldersOpen ? 'Hide folders' : 'Folders'}
         </button>
-        {foldersOpen && <div className="mt-2">{folderPanel}</div>}
+        {foldersOpen && <div className="mt-2 border border-line bg-canvas max-h-64 overflow-y-auto">{folderPanel}</div>}
       </div>
 
-      <div className="grid lg:grid-cols-[220px_1fr] gap-4 items-start min-h-[60vh]">
-        <div className="hidden lg:block sticky top-4 self-start max-h-[calc(100vh-6rem)] overflow-y-auto">
+      <div className="grid lg:grid-cols-[200px_1fr] items-stretch min-h-[60vh] border border-line bg-canvas">
+        <div className="hidden lg:block border-r border-line max-h-[calc(100vh-6rem)] overflow-y-auto sticky top-4 self-start">
           {folderPanel}
         </div>
 
-        <div className="min-w-0 flex flex-col gap-3">
-          {/* Row 2: filters aligned with list */}
-          <div className="card p-3 flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[160px]">
-              <IconSearch
-                width={14}
-                height={14}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
-              />
-              <input
-                className="input pl-8 text-sm w-full"
-                placeholder="Search title or filename…"
-                value={searchQ}
-                onChange={(e) => setSearchQ(e.target.value)}
-              />
-            </div>
-            <select
-              className="input text-sm w-auto min-w-[140px]"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-            >
-              <option value="">All projects</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title}
-                </option>
-              ))}
-            </select>
-            <select
-              className="input text-sm w-auto min-w-[140px]"
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-            >
-              <option value="">All clients</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              onClick={() => {
-                setClientId('');
-                setProjectId('');
-                setSearchQ('');
-              }}
-            >
-              Clear
-            </button>
-            {storageUsage && (
-              <div className="flex items-center gap-2 text-[11px] text-muted ml-auto shrink-0">
-                <span className="font-mono whitespace-nowrap">
-                  {formatBytes(storageUsage.usedBytes)} / {formatBytes(storageUsage.limitBytes)}
-                </span>
-                <div className="w-20 h-1.5 bg-neutral-200 overflow-hidden">
-                  <div
-                    className={`h-full ${
-                      storageUsage.usedBytes / storageUsage.limitBytes >= 0.9 ? 'bg-danger' : 'bg-primary'
-                    }`}
-                    style={{
-                      width: `${Math.min(100, (storageUsage.usedBytes / storageUsage.limitBytes) * 100)}%`,
-                    }}
-                  />
-                </div>
+        <div className="min-w-0 flex flex-col min-h-0">
+          <div className="p-3 border-b border-line shrink-0">
+            <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
+              <div className="relative flex-1 min-w-[140px]">
+                <IconSearch
+                  width={14}
+                  height={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
+                />
+                <input
+                  className="input pl-8 text-sm w-full h-9"
+                  placeholder="Search…"
+                  value={searchQ}
+                  onChange={(e) => setSearchQ(e.target.value)}
+                />
               </div>
-            )}
+              <select
+                className="input text-sm shrink-0 w-[148px] h-9"
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+              >
+                <option value="">All projects</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="input text-sm shrink-0 w-[148px] h-9"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+              >
+                <option value="">All clients</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-secondary text-sm shrink-0 h-9 px-3"
+                onClick={() => {
+                  setClientId('');
+                  setProjectId('');
+                  setSearchQ('');
+                }}
+              >
+                Clear
+              </button>
+              {storageUsage && (
+                <div className="flex items-center gap-2 text-[11px] text-muted shrink-0 pl-2 border-l border-line">
+                  <span className="font-mono whitespace-nowrap">
+                    {formatBytes(storageUsage.usedBytes)} / {formatBytes(storageUsage.limitBytes)}
+                  </span>
+                  <div className="w-16 h-1.5 bg-neutral-200 overflow-hidden">
+                    <div
+                      className={`h-full ${
+                        storageUsage.usedBytes / storageUsage.limitBytes >= 0.9 ? 'bg-danger' : 'bg-primary'
+                      }`}
+                      style={{
+                        width: `${Math.min(100, (storageUsage.usedBytes / storageUsage.limitBytes) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Detail strip */}
           {selected && (
-            <div className="card px-3 py-2 flex flex-wrap items-center gap-2 text-sm">
-              <span className="font-display font-semibold truncate max-w-[240px]">{selected.title}</span>
-              <span className={fileKind(selected.mime_type).tone}>{fileKind(selected.mime_type).label}</span>
+            <div className="px-3 py-2 flex flex-nowrap items-center gap-2 text-sm border-b border-line overflow-x-auto bg-surface/50">
+              <span className="font-display font-semibold truncate max-w-[200px] shrink-0">{selected.title}</span>
+              <span className={`${fileKind(selected.mime_type).tone} shrink-0`}>{fileKind(selected.mime_type).label}</span>
               {selected.project_id && (
-                <Link to={`/projects/${selected.project_id}`} className="badge-accent hover:underline text-xs">
+                <Link to={`/projects/${selected.project_id}`} className="badge-accent hover:underline text-xs shrink-0">
                   {selected.project_title || 'Project'}
                 </Link>
               )}
               {selected.client_id && (
                 <Link
                   to={`/clients/${selected.client_id}`}
-                  className="badge bg-emerald-50 text-success hover:underline text-xs"
+                  className="badge bg-emerald-50 text-success hover:underline text-xs shrink-0"
                 >
                   {selected.client_name}
                 </Link>
               )}
               <select
-                className="input text-xs w-auto py-1"
+                className="input text-xs w-auto py-1 h-7 shrink-0"
                 value={selected.folder_id || ''}
                 onChange={(e) => relink(selected.id, { folderId: e.target.value || null })}
               >
@@ -658,20 +665,20 @@ export default function DocumentsPage() {
                   </option>
                 ))}
               </select>
-              <div className="flex items-center gap-2 ml-auto shrink-0">
-                <a className="btn-ghost text-xs py-1.5" href={`/api/documents/${selected.id}/download`}>
+              <div className="flex items-center gap-1 ml-auto shrink-0">
+                <a className="btn-ghost text-xs py-1" href={`/api/documents/${selected.id}/download`}>
                   Download
                 </a>
                 {isTextish(selected.mime_type) && (
-                  <a className="btn-ghost text-xs py-1.5" href={`/api/documents/${selected.id}/export/docx`} download>
+                  <a className="btn-ghost text-xs py-1" href={`/api/documents/${selected.id}/export/docx`} download>
                     Export
                   </a>
                 )}
                 <ConfirmButton
                   onConfirm={() => deleteDocument(selected.id)}
                   pending={deleting}
-                  className="btn-ghost text-xs py-1.5 text-danger"
-                  confirmClassName="btn-danger text-xs py-1.5"
+                  className="btn-ghost text-xs py-1 text-danger"
+                  confirmClassName="btn-danger text-xs py-1"
                 >
                   Delete
                 </ConfirmButton>
@@ -679,10 +686,9 @@ export default function DocumentsPage() {
             </div>
           )}
 
-          {/* File list — click opens preview */}
           <div
             ref={listRef}
-            className="card overflow-hidden outline-none"
+            className="flex-1 overflow-auto outline-none"
             tabIndex={0}
             onKeyDown={onListKeyDown}
           >
@@ -693,72 +699,69 @@ export default function DocumentsPage() {
               <div className="p-10 text-center text-sm text-muted">No documents for these filters</div>
             )}
             {documents !== null && documents.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted">
-                      <th className="px-3 py-2 font-semibold">Title</th>
-                      <th className="px-3 py-2 font-semibold w-20">Type</th>
-                      <th className="px-3 py-2 font-semibold hidden md:table-cell">Project</th>
-                      <th className="px-3 py-2 font-semibold hidden lg:table-cell">Client</th>
-                      <th className="px-3 py-2 font-semibold w-24 text-right">Size</th>
-                      <th className="px-3 py-2 font-semibold w-28 hidden sm:table-cell">Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {docs.map((d) => {
-                      const kind = fileKind(d.mime_type);
-                      const active = d.id === selectedId;
-                      return (
-                        <tr
-                          key={d.id}
-                          draggable
-                          onDragStart={(e) => {
-                            dragMovedRef.current = true;
-                            e.dataTransfer.setData('text/plain', d.id);
-                            e.dataTransfer.effectAllowed = 'move';
-                          }}
-                          onDragEnd={() => {
-                            // allow next click after drag settles
-                            setTimeout(() => {
-                              dragMovedRef.current = false;
-                            }, 0);
-                          }}
-                          className={`border-b border-line last:border-0 cursor-pointer ${
-                            active ? 'bg-acc-100' : 'hover:bg-black/[0.02]'
-                          }`}
-                          onClick={() => {
-                            if (dragMovedRef.current) return;
-                            openPreview(d.id);
-                          }}
-                        >
-                          <td className="px-3 py-2.5 min-w-0">
-                            <div className="font-medium truncate max-w-[280px]">{d.title}</div>
-                            {d.filename && (
-                              <div className="text-[11px] text-muted truncate max-w-[280px]">{d.filename}</div>
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <span className={kind.tone}>{kind.label}</span>
-                          </td>
-                          <td className="px-3 py-2.5 hidden md:table-cell truncate max-w-[140px] text-muted">
-                            {d.project_title || '—'}
-                          </td>
-                          <td className="px-3 py-2.5 hidden lg:table-cell truncate max-w-[120px] text-muted">
-                            {d.client_name || '—'}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono text-xs text-muted whitespace-nowrap">
-                            {formatBytes(d.size_bytes)}
-                          </td>
-                          <td className="px-3 py-2.5 hidden sm:table-cell text-xs text-muted whitespace-nowrap">
-                            {formatDate(d.updated_at || d.created_at)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted sticky top-0 bg-canvas">
+                    <th className="px-3 py-2 font-semibold">Title</th>
+                    <th className="px-3 py-2 font-semibold w-20">Type</th>
+                    <th className="px-3 py-2 font-semibold hidden md:table-cell">Project</th>
+                    <th className="px-3 py-2 font-semibold hidden lg:table-cell">Client</th>
+                    <th className="px-3 py-2 font-semibold w-24 text-right">Size</th>
+                    <th className="px-3 py-2 font-semibold w-28 hidden sm:table-cell">Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {docs.map((d) => {
+                    const kind = fileKind(d.mime_type);
+                    const active = d.id === selectedId;
+                    return (
+                      <tr
+                        key={d.id}
+                        draggable
+                        onDragStart={(e) => {
+                          dragMovedRef.current = true;
+                          e.dataTransfer.setData('text/plain', d.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onDragEnd={() => {
+                          setTimeout(() => {
+                            dragMovedRef.current = false;
+                          }, 0);
+                        }}
+                        className={`border-b border-line last:border-0 cursor-pointer ${
+                          active ? 'bg-primary/[0.06]' : 'hover:bg-black/[0.02]'
+                        }`}
+                        onClick={() => {
+                          if (dragMovedRef.current) return;
+                          openPreview(d.id);
+                        }}
+                      >
+                        <td className="px-3 py-2.5 min-w-0">
+                          <div className="font-medium truncate max-w-[280px]">{d.title}</div>
+                          {d.filename && (
+                            <div className="text-[11px] text-muted truncate max-w-[280px]">{d.filename}</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className={kind.tone}>{kind.label}</span>
+                        </td>
+                        <td className="px-3 py-2.5 hidden md:table-cell truncate max-w-[140px] text-muted">
+                          {d.project_title || '—'}
+                        </td>
+                        <td className="px-3 py-2.5 hidden lg:table-cell truncate max-w-[120px] text-muted">
+                          {d.client_name || '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono text-xs text-muted whitespace-nowrap">
+                          {formatBytes(d.size_bytes)}
+                        </td>
+                        <td className="px-3 py-2.5 hidden sm:table-cell text-xs text-muted whitespace-nowrap">
+                          {formatDate(d.updated_at || d.created_at)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             )}
           </div>
         </div>
