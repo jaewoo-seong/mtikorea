@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import DocumentPreview from './DocumentPreview';
+import ConfirmButton from './ConfirmButton';
 import { IconChevronRight, IconX } from '../lib/icons';
 
 /**
@@ -11,6 +12,8 @@ export default function DocumentPreviewModal({
   siblings = [],
   onClose,
   onNavigate,
+  onDelete,
+  deleting = false,
 }) {
   const index = siblings.findIndex((d) => d.id === doc?.id);
   const hasPrev = index > 0;
@@ -94,6 +97,16 @@ export default function DocumentPreviewModal({
             <a className="btn-ghost text-xs py-1.5" href={`/api/documents/${doc.id}/export/docx`} download>
               Export Word
             </a>
+          )}
+          {onDelete && (
+            <ConfirmButton
+              onConfirm={() => onDelete(doc.id)}
+              pending={deleting}
+              className="btn-ghost text-xs py-1.5 text-danger"
+              confirmClassName="btn-danger text-xs py-1.5"
+            >
+              Delete
+            </ConfirmButton>
           )}
           <button type="button" className="btn-ghost p-2" onClick={onClose} aria-label="Close preview" title="Esc">
             <IconX width={18} height={18} />

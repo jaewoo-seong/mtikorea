@@ -106,4 +106,20 @@ h1, h2, h3, h4, h5, h6 {
   .blueprint > .corner.tr { top: -6px; right: -6px; }
   .blueprint > .corner.bl { bottom: -6px; left: -6px; }
   .blueprint > .corner.br { bottom: -6px; right: -6px; }
+
+  /* TipTap compose editor — page-like document body */
+  .doc-compose-editor h1 { @apply text-2xl font-display font-semibold mt-4 mb-2; }
+  .doc-compose-editor h2 { @apply text-xl font-display font-semibold mt-4 mb-2; }
+  .doc-compose-editor h3 { @apply text-lg font-display font-semibold mt-3 mb-1.5; }
+  .doc-compose-editor p { @apply my-2; }
+  .doc-compose-editor ul { @apply list-disc pl-6 my-2; }
+  .doc-compose-editor ol { @apply list-decimal pl-6 my-2; }
+  .doc-compose-editor a { @apply text-primary underline; }
+  .doc-compose-editor p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: #9ca3af;
+    pointer-events: none;
+    height: 0;
+  }
 }

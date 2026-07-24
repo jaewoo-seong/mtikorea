@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import DocumentPreviewModal from '../components/DocumentPreviewModal';
+import DocumentComposeModal from '../components/DocumentComposeModal';
 import ConfirmButton from '../components/ConfirmButton';
 import BlueprintCorners from '../components/BlueprintCorners';
 import { useToast } from '../components/Toast';
@@ -197,16 +198,15 @@ export default function DocumentsPage() {
   const [debouncedQ, setDebouncedQ] = useState(searchQ);
   const [selectedId, setSelectedId] = useState(null);
   const [previewId, setPreviewId] = useState(searchParams.get('preview') || null);
-  const [addOpen, setAddOpen] = useState(false);
-  const [foldersOpen, setFoldersOpen] = useState(false);
-  const [file, setFile] = useState(null);
-  const [title, setTitle] = useState('');
-  const [storageUsage, setStorageUsage] = useState(null);
-  const [composing, setComposing] = useState(false);
-  const [composeTitle, setComposeTitle] = useState('');
-  const [composeContent, setComposeContent] = useState('');
+  const [composeOpen, setComposeOpen] = useState(false);
   const [composeSaving, setComposeSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [foldersOpen, setFoldersOpen] = useState(false);
+  const [storageUsage, setStorageUsage] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const listRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const dragMovedRef = useRef(false);
   const toast = useToast();
 
   const folderTree = buildFolderTree(folders);
@@ -309,15 +309,13 @@ export default function DocumentsPage() {
     load().catch((e) => toast.error(e.message));
   }, [clientId, projectId, folderFilter, debouncedQ]);
 
-  // Keep selection valid when list changes; open preview from URL if present
   useEffect(() => {
     if (!documents) return;
     if (selectedId && !documents.some((d) => d.id === selectedId)) {
-      setSelectedId(documents[0]?.id || null);
+      setSelectedId(null);
     }
     if (previewId && !documents.some((d) => d.id === previewId)) {
-      // Keep URL preview until list loads matching doc, or clear if list loaded empty of it
-      if (documents.length) {
+      if (documents.length || documents !== null) {
         setPreviewId(null);
         syncParams({ preview: null });
       }
@@ -358,49 +356,60 @@ export default function DocumentsPage() {
     }
   }
 
-  async function upload(e) {
-    e.preventDefault();
+  async function uploadFile(file) {
     if (!file) return;
+    setUploading(true);
     try {
-      await api.documents.upload(file, {
-        title: title || file.name,
+      const { document: uploaded } = await api.documents.upload(file, {
+        title: file.name,
         clientId: clientId || undefined,
         projectId: projectId || undefined,
       });
-      setFile(null);
-      setTitle('');
-      toast.success('Uploaded — linked to filters above');
-      await Promise.all([load(), loadStorageUsage()]);
+      if (uploaded?.id && folderFilter !== 'all' && folderFilter !== 'root') {
+        await api.documents.update(uploaded.id, { folderId: folderFilter });
+      }
+      toast.success('Uploaded');
+      await Promise.all([load(), loadStorageUsage(), loadFolders()]);
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
-  async function composeDocument(e) {
-    e.preventDefault();
-    if (!composeTitle.trim()) {
-      toast.error('Title is required');
-      return;
-    }
+  async function saveCompose({ title, content }) {
     setComposeSaving(true);
     try {
       await api.documents.compose({
-        title: composeTitle.trim(),
-        content: composeContent,
+        title,
+        content,
         clientId: clientId || undefined,
         projectId: projectId || undefined,
         folderId: folderFilter !== 'all' && folderFilter !== 'root' ? folderFilter : undefined,
       });
       toast.success('Document created');
-      setComposeTitle('');
-      setComposeContent('');
-      setComposing(false);
-      setAddOpen(false);
-      await Promise.all([load(), loadStorageUsage()]);
+      setComposeOpen(false);
+      await Promise.all([load(), loadStorageUsage(), loadFolders()]);
     } catch (err) {
       toast.error(err.message);
     } finally {
       setComposeSaving(false);
+    }
+  }
+
+  async function deleteDocument(docId) {
+    setDeleting(true);
+    try {
+      await api.documents.delete(docId);
+      toast.success('Document deleted');
+      if (previewId === docId) closePreview();
+      if (selectedId === docId) setSelectedId(null);
+      await Promise.all([load(), loadStorageUsage(), loadFolders()]);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -503,6 +512,17 @@ export default function DocumentsPage() {
 
   return (
     <div className="space-y-4">
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) uploadFile(f);
+        }}
+      />
+
+      {/* Row 1: title + actions */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-3xl">Shared documents</h1>
@@ -510,65 +530,22 @@ export default function DocumentsPage() {
             Approved library only. Pending and rejected agent outputs stay on the project page.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn-primary text-sm"
-          onClick={() => {
-            setAddOpen((v) => !v);
-            if (addOpen) setComposing(false);
-          }}
-        >
-          {addOpen ? 'Close' : '+ Add'}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            className="btn-secondary text-sm"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {uploading ? 'Uploading…' : 'Upload'}
+          </button>
+          <button type="button" className="btn-primary text-sm" onClick={() => setComposeOpen(true)}>
+            New document
+          </button>
+        </div>
       </div>
 
-      {addOpen && (
-        <div className="card p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Add documents</span>
-            <button
-              type="button"
-              className="text-xs text-primary hover:underline font-medium"
-              onClick={() => setComposing((v) => !v)}
-            >
-              {composing ? 'Cancel new document' : '+ New document'}
-            </button>
-          </div>
-          <form onSubmit={upload} className="grid md:grid-cols-4 gap-3">
-            <input className="input" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            <div className="text-xs text-muted self-center">Uses current project/client filters when set</div>
-            <button className="btn-primary" type="submit">
-              Upload
-            </button>
-          </form>
-          {composing && (
-            <form onSubmit={composeDocument} className="space-y-2 pt-3 border-t border-line">
-              <input
-                className="input"
-                placeholder="Title"
-                value={composeTitle}
-                onChange={(e) => setComposeTitle(e.target.value)}
-                autoFocus
-              />
-              <textarea
-                className="input min-h-[140px] font-mono text-sm"
-                placeholder="Write the document content — markdown supported…"
-                value={composeContent}
-                onChange={(e) => setComposeContent(e.target.value)}
-              />
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted">Uses current project/client/folder filters when set</span>
-                <button className="btn-primary" type="submit" disabled={composeSaving}>
-                  {composeSaving ? 'Saving…' : 'Create document'}
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-      )}
-
-      {/* Mobile folder drawer toggle */}
+      {/* Mobile folder drawer */}
       <div className="lg:hidden">
         <button type="button" className="btn-secondary text-sm w-full" onClick={() => setFoldersOpen((v) => !v)}>
           {foldersOpen ? 'Hide folders' : 'Folders'}
@@ -582,7 +559,7 @@ export default function DocumentsPage() {
         </div>
 
         <div className="min-w-0 flex flex-col gap-3">
-          {/* Toolbar */}
+          {/* Row 2: filters aligned with list */}
           <div className="card p-3 flex flex-wrap items-center gap-2">
             <div className="relative flex-1 min-w-[160px]">
               <IconSearch
@@ -597,7 +574,11 @@ export default function DocumentsPage() {
                 onChange={(e) => setSearchQ(e.target.value)}
               />
             </div>
-            <select className="input text-sm w-auto min-w-[140px]" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+            <select
+              className="input text-sm w-auto min-w-[140px]"
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+            >
               <option value="">All projects</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -605,7 +586,11 @@ export default function DocumentsPage() {
                 </option>
               ))}
             </select>
-            <select className="input text-sm w-auto min-w-[140px]" value={clientId} onChange={(e) => setClientId(e.target.value)}>
+            <select
+              className="input text-sm w-auto min-w-[140px]"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+            >
               <option value="">All clients</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -643,7 +628,7 @@ export default function DocumentsPage() {
             )}
           </div>
 
-          {/* Detail strip for selected row */}
+          {/* Detail strip */}
           {selected && (
             <div className="card px-3 py-2 flex flex-wrap items-center gap-2 text-sm">
               <span className="font-display font-semibold truncate max-w-[240px]">{selected.title}</span>
@@ -654,7 +639,10 @@ export default function DocumentsPage() {
                 </Link>
               )}
               {selected.client_id && (
-                <Link to={`/clients/${selected.client_id}`} className="badge bg-emerald-50 text-success hover:underline text-xs">
+                <Link
+                  to={`/clients/${selected.client_id}`}
+                  className="badge bg-emerald-50 text-success hover:underline text-xs"
+                >
                   {selected.client_name}
                 </Link>
               )}
@@ -671,9 +659,6 @@ export default function DocumentsPage() {
                 ))}
               </select>
               <div className="flex items-center gap-2 ml-auto shrink-0">
-                <button type="button" className="btn-primary text-xs py-1.5" onClick={() => openPreview(selected.id)}>
-                  Open
-                </button>
                 <a className="btn-ghost text-xs py-1.5" href={`/api/documents/${selected.id}/download`}>
                   Download
                 </a>
@@ -682,11 +667,19 @@ export default function DocumentsPage() {
                     Export
                   </a>
                 )}
+                <ConfirmButton
+                  onConfirm={() => deleteDocument(selected.id)}
+                  pending={deleting}
+                  className="btn-ghost text-xs py-1.5 text-danger"
+                  confirmClassName="btn-danger text-xs py-1.5"
+                >
+                  Delete
+                </ConfirmButton>
               </div>
             </div>
           )}
 
-          {/* File list */}
+          {/* File list — click opens preview */}
           <div
             ref={listRef}
             className="card overflow-hidden outline-none"
@@ -721,14 +714,23 @@ export default function DocumentsPage() {
                           key={d.id}
                           draggable
                           onDragStart={(e) => {
+                            dragMovedRef.current = true;
                             e.dataTransfer.setData('text/plain', d.id);
                             e.dataTransfer.effectAllowed = 'move';
+                          }}
+                          onDragEnd={() => {
+                            // allow next click after drag settles
+                            setTimeout(() => {
+                              dragMovedRef.current = false;
+                            }, 0);
                           }}
                           className={`border-b border-line last:border-0 cursor-pointer ${
                             active ? 'bg-acc-100' : 'hover:bg-black/[0.02]'
                           }`}
-                          onClick={() => setSelectedId(d.id)}
-                          onDoubleClick={() => openPreview(d.id)}
+                          onClick={() => {
+                            if (dragMovedRef.current) return;
+                            openPreview(d.id);
+                          }}
                         >
                           <td className="px-3 py-2.5 min-w-0">
                             <div className="font-medium truncate max-w-[280px]">{d.title}</div>
@@ -768,6 +770,16 @@ export default function DocumentsPage() {
           siblings={docs}
           onClose={closePreview}
           onNavigate={navigatePreview}
+          onDelete={deleteDocument}
+          deleting={deleting}
+        />
+      )}
+
+      {composeOpen && (
+        <DocumentComposeModal
+          saving={composeSaving}
+          onClose={() => !composeSaving && setComposeOpen(false)}
+          onSave={saveCompose}
         />
       )}
     </div>
