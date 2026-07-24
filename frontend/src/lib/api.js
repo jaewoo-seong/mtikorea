@@ -107,6 +107,13 @@ export const api = {
     reject: (id) => request(`/api/documents/${id}/reject`, { method: 'POST', body: '{}' }),
     compose: (body) => request('/api/documents/compose', { method: 'POST', body: JSON.stringify(body) }),
     delete: (id) => request(`/api/documents/${id}`, { method: 'DELETE' }),
+    bulkDelete: (ids) =>
+      request('/api/documents/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
+    bulkMove: (ids, folderId) =>
+      request('/api/documents/bulk-move', {
+        method: 'POST',
+        body: JSON.stringify({ ids, folderId }),
+      }),
     storageUsage: () => request('/api/documents/storage-usage'),
   },
 
@@ -185,6 +192,7 @@ export const api = {
 
   settings: {
     stats: () => request('/api/settings/stats'),
+    myStats: () => request('/api/settings/my-stats'),
     changePassword: (body) =>
       request('/api/settings/password', { method: 'POST', body: JSON.stringify(body) }),
   },

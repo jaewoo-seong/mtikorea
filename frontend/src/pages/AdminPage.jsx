@@ -2,10 +2,118 @@ import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useToast } from '../components/Toast';
-import { IconAlert, IconCheck, IconLoader } from '../lib/icons';
+import { IconAlert, IconCheck, IconLoader, IconRotate, IconCopy } from '../lib/icons';
 import ConfirmButton from '../components/ConfirmButton';
 
 const PROVIDER_LABELS = { openrouter: 'OpenRouter', nvidia: 'NVIDIA NIM (free tier)' };
+
+// No 0/O/1/l/I — a temp password read aloud or typed from a screenshot shouldn't
+// be ambiguous.
+const PW_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+
+function generateTempPassword(length = 12) {
+  const bytes = new Uint32Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => PW_ALPHABET[b % PW_ALPHABET.length]).join('');
+}
+
+/**
+ * Password cells never display an *existing* password — scrypt hashes aren't
+ * reversible, and storing them any other way would be a real security
+ * regression. What an admin can do is set a new temporary one and read it back
+ * exactly once, right after generating it, to hand to the teammate.
+ */
+function PasswordCell({ u, onSet }) {
+  const [open, setOpen] = useState(false);
+  const [pw, setPw] = useState('');
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  if (!u.username) {
+    return (
+      <span className="text-xs text-muted">
+        {u.oauth_provider === 'google' ? 'Google-only' : 'No password login'}
+      </span>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="btn-ghost text-xs"
+        onClick={() => {
+          setPw(generateTempPassword());
+          setOpen(true);
+        }}
+      >
+        {u.has_password ? 'Reset password' : 'Set password'}
+      </button>
+    );
+  }
+
+  async function save() {
+    if (pw.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSet(u.id, pw);
+      toast.success(`Password set for @${u.username} — copy it now, it won't be shown again`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+      setOpen(false);
+      setPw('');
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        className="input text-xs py-1 h-7 w-32 font-mono"
+        value={pw}
+        autoFocus
+        onChange={(e) => setPw(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') save();
+          if (e.key === 'Escape') setOpen(false);
+        }}
+      />
+      <button
+        type="button"
+        className="btn-ghost p-1"
+        title="Generate a new one"
+        onClick={() => setPw(generateTempPassword())}
+      >
+        <IconRotate width={12} height={12} />
+      </button>
+      <button
+        type="button"
+        className="btn-ghost p-1"
+        title="Copy to clipboard"
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(pw);
+            toast.success('Copied');
+          } catch {
+            toast.error('Clipboard unavailable — select and copy manually');
+          }
+        }}
+      >
+        <IconCopy width={12} height={12} />
+      </button>
+      <button type="button" className="btn-primary text-xs py-1 px-2" disabled={saving} onClick={save}>
+        {saving ? 'Saving…' : 'Save'}
+      </button>
+      <button type="button" className="btn-ghost text-xs py-1" onClick={() => setOpen(false)}>
+        Cancel
+      </button>
+    </div>
+  );
+}
 
 function KeyStatusBadge({ status }) {
   if (status === 'healthy') {
@@ -133,13 +241,27 @@ export default function AdminPage({ user }) {
         <input className="input" required placeholder="Username"
           value={newAccount.username}
           onChange={(e) => setNewAccount({ ...newAccount, username: e.target.value })} />
-        <input className="input" required type="password" placeholder="Password (min 8 chars)"
-          value={newAccount.password}
-          onChange={(e) => setNewAccount({ ...newAccount, password: e.target.value })} />
+        <div className="flex gap-1">
+          <input className="input font-mono" required placeholder="Temporary password (min 8 chars)"
+            value={newAccount.password}
+            onChange={(e) => setNewAccount({ ...newAccount, password: e.target.value })} />
+          <button
+            type="button"
+            className="btn-secondary px-2 shrink-0"
+            title="Generate a temporary password"
+            onClick={() => setNewAccount({ ...newAccount, password: generateTempPassword() })}
+          >
+            <IconRotate width={14} height={14} />
+          </button>
+        </div>
         <input className="input" placeholder="Display name" value={newAccount.name}
           onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })} />
         <button className="btn-primary" type="submit">Create account</button>
       </form>
+      <p className="text-xs text-muted -mt-3">
+        The teammate signs in with this and changes it themselves from Settings — there's no need to pick
+        something memorable.
+      </p>
 
       {msg && <p className="text-sm text-muted">{msg}</p>}
 
@@ -176,32 +298,7 @@ export default function AdminPage({ user }) {
                   </button>
                 </td>
                 <td className="px-4 py-3">
-                  {u.username ? (
-                    <button
-                      type="button"
-                      className="btn-ghost text-xs"
-                      onClick={async () => {
-                        const pw = window.prompt(`New password for @${u.username} (min 8 chars)`);
-                        if (!pw) return;
-                        if (pw.length < 8) {
-                          toast.error('Password must be at least 8 characters');
-                          return;
-                        }
-                        try {
-                          await updateUser(u.id, { password: pw });
-                          toast.success(`Password updated for @${u.username}`);
-                        } catch (err) {
-                          toast.error(err.message);
-                        }
-                      }}
-                    >
-                      {u.has_password ? 'Reset password' : 'Set password'}
-                    </button>
-                  ) : (
-                    <span className="text-xs text-muted">
-                      {u.oauth_provider === 'google' ? 'Google-only' : 'No password login'}
-                    </span>
-                  )}
+                  <PasswordCell u={u} onSet={(id, password) => updateUser(id, { password })} />
                 </td>
               </tr>
             ))}

@@ -469,6 +469,45 @@ router.get('/:id/export/docx', async (req, res, next) => {
   }
 });
 
+router.post('/bulk-delete', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const ids = Array.isArray(req.body?.ids) ? [...new Set(req.body.ids)].filter(Boolean) : [];
+    if (!ids.length) return res.status(400).json({ error: 'ids required' });
+    const { rowCount } = await query(
+      'DELETE FROM shared_documents WHERE id = ANY($1::uuid[]) AND org_id = $2',
+      [ids, req.user.org_id]
+    );
+    res.json({ ok: true, deleted: rowCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/bulk-move', async (req, res, next) => {
+  try {
+    if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    const ids = Array.isArray(req.body?.ids) ? [...new Set(req.body.ids)].filter(Boolean) : [];
+    if (!ids.length) return res.status(400).json({ error: 'ids required' });
+    const folderId = req.body?.folderId || null;
+    if (folderId) {
+      const folder = await query('SELECT id FROM document_folders WHERE id = $1 AND org_id = $2', [
+        folderId,
+        req.user.org_id,
+      ]);
+      if (!folder.rows[0]) return res.status(404).json({ error: 'Folder not found' });
+    }
+    const { rowCount } = await query(
+      `UPDATE shared_documents SET folder_id = $3, updated_at = now()
+       WHERE id = ANY($1::uuid[]) AND org_id = $2`,
+      [ids, req.user.org_id, folderId]
+    );
+    res.json({ ok: true, moved: rowCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete('/:id', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });

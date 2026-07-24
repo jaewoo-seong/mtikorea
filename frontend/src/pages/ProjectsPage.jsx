@@ -230,12 +230,14 @@ export default function ProjectsPage() {
                     <span className="text-muted inline-flex items-center gap-1">
                       <IconClock width={10} height={10} /> Time
                     </span>
-                    <span className="font-mono">
+                    <span className="font-mono capitalize">
                       {p.time_budget_minutes != null
                         ? `${formatBudgetMinutes(remainingMin)} left`
                         : p.allotted_hours != null
                           ? `${p.allotted_hours}h allotted (legacy)`
-                          : 'No budget'}
+                          : p.budget_mode && p.budget_mode !== 'timed'
+                            ? p.budget_mode
+                            : 'No budget'}
                     </span>
                   </div>
                   {p.time_budget_minutes != null && (

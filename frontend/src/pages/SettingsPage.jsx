@@ -40,7 +40,238 @@ function StatusList({ title, rows, labelKey = 'status' }) {
   );
 }
 
+function TokensByProject({ rows }) {
+  return (
+    <div className="card p-5 space-y-3">
+      <div className="font-semibold">Token usage by project</div>
+      {!rows.length && <div className="text-sm text-muted">No projects yet</div>}
+      <div className="space-y-3">
+        {rows.map((p) => {
+          const capped = p.token_budget != null;
+          const p2 = capped ? pct(p.tokens_used, p.token_budget) : null;
+          return (
+            <div key={p.id} className="space-y-1">
+              <div className="flex items-center justify-between text-sm">
+                <span className="truncate pr-2">{p.title}</span>
+                <span className="font-mono text-xs text-muted shrink-0">
+                  {capped
+                    ? `${Number(p.tokens_used).toLocaleString()}/${Number(p.token_budget).toLocaleString()} (${p2}%)`
+                    : `${Number(p.tokens_used).toLocaleString()} · no cap`}
+                </span>
+              </div>
+              {capped && (
+                <div className="h-1.5 bg-neutral-200 overflow-hidden">
+                  <div
+                    className={`h-full ${p2 >= 100 ? 'bg-danger' : 'bg-primary'}`}
+                    style={{ width: `${p2}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ActivityList({ rows }) {
+  return (
+    <div className="card p-5 space-y-3">
+      <div className="font-semibold flex items-center gap-2">
+        <IconClock width={16} height={16} />
+        Recent activity
+      </div>
+      {!rows.length && <div className="text-sm text-muted">No activity yet</div>}
+      <div className="space-y-2">
+        {rows.map((a, i) => (
+          <div key={i} className="border border-line px-3 py-2 text-sm flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold">{stageLabel(a.stage)}</span>
+                {a.action && <span className="text-xs text-muted">{a.action}</span>}
+                {a.project_title && <span className="text-xs text-muted truncate">· {a.project_title}</span>}
+              </div>
+              {a.summary && <div className="text-xs text-muted mt-0.5 truncate">{a.summary}</div>}
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-xs text-muted">{new Date(a.created_at).toLocaleString()}</div>
+              {a.model && <div className="text-xs font-mono text-muted">{a.model}</div>}
+              {a.tokens_used != null && (
+                <div className="text-xs font-mono">{Number(a.tokens_used).toLocaleString()} tok</div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Everything, org-wide — admin only. */
+function AdminStatsView({ stats }) {
+  const projects = stats?.projects || { total: 0, byStatus: [] };
+  const tokens = stats?.tokens || { totalUsed: 0, totalBudget: 0, byProject: [] };
+  const tokensByModel = stats?.tokensByModel || [];
+  const events = stats?.events || { total: 0, byStage: [] };
+  const documents = stats?.documents || { byVisibility: [] };
+  const tasks = stats?.tasks || { byStatus: [] };
+  const users = stats?.users || { activeCount: 0 };
+  const recentActivity = stats?.recentActivity || [];
+
+  const docsTotal = documents.byVisibility.reduce((s, r) => s + Number(r.count || 0), 0);
+  const tasksTotal = tasks.byStatus.reduce((s, r) => s + Number(r.count || 0), 0);
+  const legacyPct = pct(tokens.legacyUsed, tokens.legacyBudget);
+  const maxModelTokens = Math.max(1, ...tokensByModel.map((m) => Number(m.tokens) || 0));
+  const maxEventCount = Math.max(1, ...events.byStage.map((e) => Number(e.count) || 0));
+
+  return (
+    <div className="space-y-6">
+      <div className="card p-5 space-y-4">
+        <div className="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm">
+          <Tile label="Total projects" value={projects.total} />
+          <Tile
+            label="Tokens used"
+            value={tokens.totalUsed.toLocaleString()}
+            sub={
+              tokens.legacyCappedCount > 0
+                ? `${tokens.legacyCappedCount} legacy project(s) had a token cap`
+                : 'No cap — tracked for cost visibility'
+            }
+          />
+          <Tile label="Documents" value={docsTotal} />
+          <Tile label="Requests" value={tasksTotal} />
+          <Tile label="Active users" value={users.activeCount} />
+        </div>
+        {tokens.legacyCappedCount > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs text-muted">
+              <span>Legacy token-capped projects</span>
+              <span className="font-mono">
+                {tokens.legacyUsed.toLocaleString()}/{tokens.legacyBudget.toLocaleString()} ({legacyPct}%)
+              </span>
+            </div>
+            <div className="h-1.5 bg-neutral-200 overflow-hidden">
+              <div className="h-full bg-primary transition-all duration-700" style={{ width: `${legacyPct}%` }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-5">
+        <TokensByProject rows={tokens.byProject} />
+
+        <div className="card p-5 space-y-3">
+          <div className="font-semibold">Token usage by model</div>
+          {!tokensByModel.length && <div className="text-sm text-muted">No model events yet</div>}
+          <div className="space-y-3">
+            {tokensByModel.map((m) => (
+              <div key={m.model} className="space-y-1">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="truncate pr-2 font-mono text-xs">{m.model}</span>
+                  <span className="text-xs text-muted shrink-0">
+                    {m.tokens.toLocaleString()} tok · {m.count} events
+                  </span>
+                </div>
+                <div className="h-1.5 bg-neutral-200 overflow-hidden">
+                  <div
+                    className="h-full bg-primary"
+                    style={{ width: `${Math.round((m.tokens / maxModelTokens) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-5">
+        <StatusList title="Projects by status" rows={projects.byStatus} />
+        <StatusList title="Documents by visibility" rows={documents.byVisibility} labelKey="visibility" />
+        <StatusList title="Requests by status" rows={tasks.byStatus} />
+      </div>
+
+      <div className="card p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="font-semibold">Agent events by stage</div>
+          <div className="text-xs text-muted">{events.total.toLocaleString()} total events</div>
+        </div>
+        {!events.byStage.length && <div className="text-sm text-muted">No agent events yet</div>}
+        <div className="space-y-2">
+          {events.byStage.map((e) => (
+            <div key={e.stage || 'unknown'} className="space-y-1">
+              <div className="flex items-center justify-between text-sm">
+                <span>{stageLabel(e.stage)}</span>
+                <span className="font-mono text-xs text-muted">{e.count}</span>
+              </div>
+              <div className="h-1.5 bg-neutral-200 overflow-hidden">
+                <div
+                  className="h-full bg-primary"
+                  style={{ width: `${Math.round((e.count / maxEventCount) * 100)}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <ActivityList rows={recentActivity} />
+
+      {!projects.total && (
+        <div className="card p-5 flex items-center gap-2 text-sm text-muted">
+          <IconUsers width={16} height={16} />
+          This organization has no projects yet — stats will populate as agents run.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Just what this person raised — their projects, their docs, their requests. */
+function MyStatsView({ stats }) {
+  const projects = stats?.projects || { total: 0, byStatus: [] };
+  const tokens = stats?.tokens || { totalUsed: 0, byProject: [] };
+  const documents = stats?.documents || { total: 0, byVisibility: [] };
+  const requests = stats?.requests || { byRole: [] };
+  const recentActivity = stats?.recentActivity || [];
+
+  const requestsTotal = requests.byRole.reduce((s, r) => s + Number(r.count || 0), 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="card p-5">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+          <Tile label="My projects" value={projects.total} />
+          <Tile label="Tokens used (mine)" value={tokens.totalUsed.toLocaleString()} sub="Across projects I created" />
+          <Tile label="My documents" value={documents.total} />
+          <Tile label="My requests" value={requestsTotal} sub="Raised, approving, or following" />
+        </div>
+      </div>
+
+      {projects.total ? (
+        <div className="grid lg:grid-cols-2 gap-5">
+          <TokensByProject rows={tokens.byProject} />
+          <StatusList title="My projects by status" rows={projects.byStatus} />
+        </div>
+      ) : (
+        <div className="card p-5 flex items-center gap-2 text-sm text-muted">
+          <IconUsers width={16} height={16} />
+          You haven't created any projects yet — this fills in once you do.
+        </div>
+      )}
+
+      <div className="grid lg:grid-cols-2 gap-5">
+        <StatusList title="My documents by visibility" rows={documents.byVisibility} labelKey="visibility" />
+        <StatusList title="My requests by role" rows={requests.byRole} labelKey="role" />
+      </div>
+
+      <ActivityList rows={recentActivity} />
+    </div>
+  );
+}
+
 export default function SettingsPage({ user }) {
+  const isAdmin = user?.role === 'admin';
   const [stats, setStats] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -51,8 +282,8 @@ export default function SettingsPage({ user }) {
 
   useEffect(() => {
     let cancelled = false;
-    api.settings
-      .stats()
+    const load = isAdmin ? api.settings.stats : api.settings.myStats;
+    load()
       .then((data) => {
         if (!cancelled) setStats(data);
       })
@@ -65,7 +296,7 @@ export default function SettingsPage({ user }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAdmin]);
 
   async function changePassword(e) {
     e.preventDefault();
@@ -148,215 +379,34 @@ export default function SettingsPage({ user }) {
     </div>
   );
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-3xl">Settings</h1>
-        {accountCard}
-        <div className="flex items-center gap-2 text-sm text-muted">
-          <IconLoader width={16} height={16} />
-          Loading stats…
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-3xl">Settings</h1>
-        {accountCard}
-        <div className="card p-5 border border-red-200 bg-red-50 flex items-center gap-2 text-sm text-danger">
-          <IconAlert width={18} height={18} />
-          {error}
-        </div>
-      </div>
-    );
-  }
-
-  const projects = stats?.projects || { total: 0, byStatus: [] };
-  const tokens = stats?.tokens || { totalUsed: 0, totalBudget: 0, byProject: [] };
-  const tokensByModel = stats?.tokensByModel || [];
-  const events = stats?.events || { total: 0, byStage: [] };
-  const documents = stats?.documents || { byVisibility: [] };
-  const tasks = stats?.tasks || { byStatus: [] };
-  const users = stats?.users || { activeCount: 0 };
-  const recentActivity = stats?.recentActivity || [];
-
-  const docsTotal = documents.byVisibility.reduce((s, r) => s + Number(r.count || 0), 0);
-  const tasksTotal = tasks.byStatus.reduce((s, r) => s + Number(r.count || 0), 0);
-  const legacyPct = pct(tokens.legacyUsed, tokens.legacyBudget);
-  const maxModelTokens = Math.max(1, ...tokensByModel.map((m) => Number(m.tokens) || 0));
-  const maxEventCount = Math.max(1, ...events.byStage.map((e) => Number(e.count) || 0));
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl">Settings</h1>
         <p className="text-sm text-muted mt-1">
-          Account password, operational overview — token usage, agent activity, and system stats.
+          {isAdmin
+            ? 'Account password, and an operational overview — token usage, agent activity, and system stats for the whole organization.'
+            : 'Account password, and your own usage — projects, tokens, documents, and requests.'}
         </p>
       </div>
 
       {accountCard}
 
-      <div className="card p-5 space-y-4">
-        <div className="grid sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm">
-          <Tile label="Total projects" value={projects.total} />
-          <Tile
-            label="Tokens used"
-            value={tokens.totalUsed.toLocaleString()}
-            sub={
-              tokens.legacyCappedCount > 0
-                ? `${tokens.legacyCappedCount} legacy project(s) had a token cap`
-                : 'No cap — tracked for cost visibility'
-            }
-          />
-          <Tile label="Documents" value={docsTotal} />
-          <Tile label="Requests" value={tasksTotal} />
-          <Tile label="Active users" value={users.activeCount} />
-        </div>
-        {tokens.legacyCappedCount > 0 && (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-xs text-muted">
-              <span>Legacy token-capped projects</span>
-              <span className="font-mono">
-                {tokens.legacyUsed.toLocaleString()}/{tokens.legacyBudget.toLocaleString()} ({legacyPct}%)
-              </span>
-            </div>
-            <div className="h-1.5 bg-neutral-200 overflow-hidden">
-              <div
-                className="h-full bg-primary transition-all duration-700"
-                style={{ width: `${legacyPct}%` }}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="grid lg:grid-cols-2 gap-5">
-        <div className="card p-5 space-y-3">
-          <div className="font-semibold">Token usage by project</div>
-          {!tokens.byProject.length && <div className="text-sm text-muted">No projects yet</div>}
-          <div className="space-y-3">
-            {tokens.byProject.map((p) => {
-              const capped = p.token_budget != null;
-              const p2 = capped ? pct(p.tokens_used, p.token_budget) : null;
-              return (
-                <div key={p.id} className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="truncate pr-2">{p.title}</span>
-                    <span className="font-mono text-xs text-muted shrink-0">
-                      {capped
-                        ? `${Number(p.tokens_used).toLocaleString()}/${Number(p.token_budget).toLocaleString()} (${p2}%)`
-                        : `${Number(p.tokens_used).toLocaleString()} · no cap`}
-                    </span>
-                  </div>
-                  {capped && (
-                    <div className="h-1.5 bg-neutral-200 overflow-hidden">
-                      <div
-                        className={`h-full ${p2 >= 100 ? 'bg-danger' : 'bg-primary'}`}
-                        style={{ width: `${p2}%` }}
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="card p-5 space-y-3">
-          <div className="font-semibold">Token usage by model</div>
-          {!tokensByModel.length && <div className="text-sm text-muted">No model events yet</div>}
-          <div className="space-y-3">
-            {tokensByModel.map((m) => (
-              <div key={m.model} className="space-y-1">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="truncate pr-2 font-mono text-xs">{m.model}</span>
-                  <span className="text-xs text-muted shrink-0">
-                    {m.tokens.toLocaleString()} tok · {m.count} events
-                  </span>
-                </div>
-                <div className="h-1.5 bg-neutral-200 overflow-hidden">
-                  <div
-                    className="h-full bg-primary"
-                    style={{ width: `${Math.round((m.tokens / maxModelTokens) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-5">
-        <StatusList title="Projects by status" rows={projects.byStatus} />
-        <StatusList title="Documents by visibility" rows={documents.byVisibility} labelKey="visibility" />
-        <StatusList title="Tasks by status" rows={tasks.byStatus} />
-      </div>
-
-      <div className="card p-5 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="font-semibold">Agent events by stage</div>
-          <div className="text-xs text-muted">{events.total.toLocaleString()} total events</div>
-        </div>
-        {!events.byStage.length && <div className="text-sm text-muted">No agent events yet</div>}
-        <div className="space-y-2">
-          {events.byStage.map((e) => (
-            <div key={e.stage || 'unknown'} className="space-y-1">
-              <div className="flex items-center justify-between text-sm">
-                <span>{stageLabel(e.stage)}</span>
-                <span className="font-mono text-xs text-muted">{e.count}</span>
-              </div>
-              <div className="h-1.5 bg-neutral-200 overflow-hidden">
-                <div
-                  className="h-full bg-primary"
-                  style={{ width: `${Math.round((e.count / maxEventCount) * 100)}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="card p-5 space-y-3">
-        <div className="font-semibold flex items-center gap-2">
-          <IconClock width={16} height={16} />
-          Recent activity
-        </div>
-        {!recentActivity.length && <div className="text-sm text-muted">No activity yet</div>}
-        <div className="space-y-2">
-          {recentActivity.map((a, i) => (
-            <div key={i} className="border border-line px-3 py-2 text-sm flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold">{stageLabel(a.stage)}</span>
-                  {a.action && <span className="text-xs text-muted">{a.action}</span>}
-                  {a.project_title && (
-                    <span className="text-xs text-muted truncate">· {a.project_title}</span>
-                  )}
-                </div>
-                {a.summary && <div className="text-xs text-muted mt-0.5 truncate">{a.summary}</div>}
-              </div>
-              <div className="text-right shrink-0">
-                <div className="text-xs text-muted">{new Date(a.created_at).toLocaleString()}</div>
-                {a.model && <div className="text-xs font-mono text-muted">{a.model}</div>}
-                {a.tokens_used != null && (
-                  <div className="text-xs font-mono">{Number(a.tokens_used).toLocaleString()} tok</div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {!projects.total && (
-        <div className="card p-5 flex items-center gap-2 text-sm text-muted">
-          <IconUsers width={16} height={16} />
-          This organization has no projects yet — stats will populate as agents run.
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-muted">
+          <IconLoader width={16} height={16} />
+          Loading stats…
         </div>
       )}
+
+      {!loading && error && (
+        <div className="card p-5 border border-red-200 bg-red-50 flex items-center gap-2 text-sm text-danger">
+          <IconAlert width={18} height={18} />
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && (isAdmin ? <AdminStatsView stats={stats} /> : <MyStatsView stats={stats} />)}
     </div>
   );
 }

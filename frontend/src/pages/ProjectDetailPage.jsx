@@ -6,6 +6,7 @@ import DocumentPreviewModal from '../components/DocumentPreviewModal';
 import ConfirmButton from '../components/ConfirmButton';
 import { stateChip } from '../lib/taskMeta';
 import {
+  BUDGET_MODES,
   PIPELINE,
   buildDiagnostics,
   checkpointOf,
@@ -209,7 +210,12 @@ export default function ProjectDetailPage() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [msg, setMsg] = useState('');
-  const [schedule, setSchedule] = useState({ timeBudgetMinutes: '', allottedHours: '', dueAt: '' });
+  const [schedule, setSchedule] = useState({
+    budgetMode: 'timed',
+    timeBudgetMinutes: '',
+    allottedHours: '',
+    dueAt: '',
+  });
   const toast = useToast();
   const [taskTitle, setTaskTitle] = useState('');
   const [chatInput, setChatInput] = useState('');
@@ -238,6 +244,7 @@ export default function ProjectDetailPage() {
     const d = await api.projects.get(id);
     setData(d);
     setSchedule({
+      budgetMode: d.project.budget_mode || 'timed',
       timeBudgetMinutes: d.project.time_budget_minutes ?? '',
       allottedHours: d.project.allotted_hours ?? '',
       dueAt: d.project.due_at ? new Date(d.project.due_at).toISOString().slice(0, 16) : '',
@@ -286,9 +293,13 @@ export default function ProjectDetailPage() {
     e.preventDefault();
     try {
       await api.projects.update(id, {
-        timeBudgetMinutes: schedule.timeBudgetMinutes === '' ? null : Number(schedule.timeBudgetMinutes),
+        budgetMode: schedule.budgetMode,
+        timeBudgetMinutes:
+          schedule.budgetMode === 'timed' && schedule.timeBudgetMinutes !== ''
+            ? Number(schedule.timeBudgetMinutes)
+            : null,
       });
-      toast.success('Time budget updated');
+      toast.success('Budget updated');
       await load();
     } catch (err) {
       toast.error(err.message);
@@ -826,6 +837,9 @@ export default function ProjectDetailPage() {
         <div className="flex items-center gap-3 flex-wrap">
           <ProgressBar value={project.progressPct ?? project.progress_pct} live={live} compact />
           <div className="flex items-center gap-3 text-xs text-muted shrink-0">
+            {project.budget_mode && project.budget_mode !== 'timed' && (
+              <span className="badge-neutral capitalize">{project.budget_mode}</span>
+            )}
             {timeLeft && (
               <span className="inline-flex items-center gap-1">
                 <IconClock width={11} height={11} />
@@ -1202,38 +1216,61 @@ export default function ProjectDetailPage() {
                 </div>
               )}
 
-              <form onSubmit={saveSchedule} className="card p-5 grid md:grid-cols-3 gap-3 items-end">
-                <label className="text-sm md:col-span-2">
-                  <span className="text-muted text-xs">
-                    Time budget (minutes, 5–720){' '}
-                    {schedule.timeBudgetMinutes !== '' && (
-                      <span className="text-ink font-medium">
-                        — {formatBudgetMinutes(Number(schedule.timeBudgetMinutes))}
+              <form onSubmit={saveSchedule} className="card p-5 space-y-3">
+                <div className="seg flex-wrap w-full">
+                  {BUDGET_MODES.map((m) => (
+                    <button
+                      key={m.key}
+                      type="button"
+                      className={`seg-opt flex-1 ${schedule.budgetMode === m.key ? 'seg-opt-active' : ''}`}
+                      disabled={live}
+                      onClick={() => setSchedule({ ...schedule, budgetMode: m.key })}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted">
+                  {BUDGET_MODES.find((m) => m.key === schedule.budgetMode)?.hint}
+                </p>
+
+                <div className="grid md:grid-cols-3 gap-3 items-end">
+                  {schedule.budgetMode === 'timed' ? (
+                    <label className="text-sm md:col-span-2">
+                      <span className="text-muted text-xs">
+                        Time budget (minutes, 5–720){' '}
+                        {schedule.timeBudgetMinutes !== '' && (
+                          <span className="text-ink font-medium">
+                            — {formatBudgetMinutes(Number(schedule.timeBudgetMinutes))}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                  <input
-                    className="input mt-1"
-                    type="number"
-                    min="5"
-                    max="720"
-                    step="5"
-                    value={schedule.timeBudgetMinutes}
-                    onChange={(e) => setSchedule({ ...schedule, timeBudgetMinutes: e.target.value })}
-                    disabled={live}
-                  />
-                  {(schedule.allottedHours !== '' || schedule.dueAt !== '') && (
-                    <span className="text-xs text-muted mt-1 block">
-                      Legacy: {schedule.allottedHours !== '' ? `${schedule.allottedHours}h allotted` : ''}
-                      {schedule.allottedHours !== '' && schedule.dueAt !== '' ? ' · ' : ''}
-                      {schedule.dueAt !== '' ? `due ${new Date(schedule.dueAt).toLocaleString()}` : ''}
-                      {' '}— set a time budget above to switch this project to the current model.
-                    </span>
+                      <input
+                        className="input mt-1"
+                        type="number"
+                        min="5"
+                        max="720"
+                        step="5"
+                        value={schedule.timeBudgetMinutes}
+                        onChange={(e) => setSchedule({ ...schedule, timeBudgetMinutes: e.target.value })}
+                        disabled={live}
+                      />
+                      {(schedule.allottedHours !== '' || schedule.dueAt !== '') && (
+                        <span className="text-xs text-muted mt-1 block">
+                          Legacy: {schedule.allottedHours !== '' ? `${schedule.allottedHours}h allotted` : ''}
+                          {schedule.allottedHours !== '' && schedule.dueAt !== '' ? ' · ' : ''}
+                          {schedule.dueAt !== '' ? `due ${new Date(schedule.dueAt).toLocaleString()}` : ''}
+                          {' '}— set a time budget above to switch this project to the current model.
+                        </span>
+                      )}
+                    </label>
+                  ) : (
+                    <div className="text-sm md:col-span-2 text-muted">No timer to set for this mode.</div>
                   )}
-                </label>
-                <button className="btn-secondary" type="submit" disabled={live}>
-                  Save time budget
-                </button>
+                  <button className="btn-secondary" type="submit" disabled={live}>
+                    Save budget
+                  </button>
+                </div>
               </form>
 
               <div className="card p-5 min-w-0">

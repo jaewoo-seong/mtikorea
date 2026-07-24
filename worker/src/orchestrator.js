@@ -257,7 +257,9 @@ async function runOrchestratorCycle(project, context = {}) {
   const onProgress = typeof context.onProgress === 'function' ? context.onProgress : async () => {};
   const onEvent = typeof context.onEvent === 'function' ? context.onEvent : async () => {};
 
+  const budgetMode = project.budget_mode || 'timed';
   const scheduleNote = [
+    `Budget mode: ${budgetMode}`,
     project.time_budget_minutes != null ? `Time budget: ${project.time_budget_minutes}m` : null,
     project.allotted_hours != null ? `Allotted hours: ${project.allotted_hours} (legacy)` : null,
     project.due_at ? `Due: ${project.due_at}` : null,
@@ -265,6 +267,16 @@ async function runOrchestratorCycle(project, context = {}) {
   ]
     .filter(Boolean)
     .join(' · ');
+
+  // Only fast/auto need an explicit behavioral override — "timed" is the
+  // default the static system prompts already assume (keep inventing work
+  // until the clock runs out).
+  const budgetModeInstruction =
+    budgetMode === 'fast'
+      ? 'IMPORTANT — FAST MODE: Do the smallest amount of genuinely useful work that satisfies the goal, then report status "done". Skip broad exploration; spawn at most 1 subtask only if truly necessary, otherwise none. This cycle (or the next) should be your last.'
+      : budgetMode === 'auto'
+        ? 'IMPORTANT — AUTO MODE: There is no time limit, but do not pad cycles with filler. Keep improving with genuinely new angles while they exist. The moment you cannot think of anything more valuable to add, report status "done" honestly — that will actually stop the run.'
+        : null;
 
   if (!hasApiKey()) {
     await onProgress({
@@ -311,6 +323,7 @@ async function runOrchestratorCycle(project, context = {}) {
     `Desired output: ${project.desired_output || '(not specified — use your judgement based on the goal)'}`,
     `Iteration/cycle: ${step}`,
     scheduleNote,
+    budgetModeInstruction,
     `Briefing files: ${fileNames.length ? fileNames.join(', ') : '(none)'}`,
     pendingUserInstructions.length
       ? `NEW INSTRUCTION FROM USER (just sent, address this specifically this cycle): ${pendingUserInstructions.join(' | ')}`
@@ -818,8 +831,14 @@ function failResult({
 
 function localCycle(project, step, scheduleNote) {
   const progress = Math.min(95, 10 + step * 8);
+  // Local/no-API-key mode still needs to demonstrate fast/auto stopping —
+  // "continue" forever would only ever be caught by auto's cycle-cap safety
+  // net, never its "done" path. Fast wraps up on its last allowed cycle; auto
+  // calls it done after a few mock iterations.
+  const mode = project.budget_mode || 'timed';
+  const status = (mode === 'fast' && step >= 2) || (mode === 'auto' && step >= 3) ? 'done' : 'continue';
   return {
-    status: 'continue',
+    status,
     summary: `Local iteration ${step} on "${project.title}". ${scheduleNote}. Set OPENROUTER_API_KEY for real loop.`,
     detail: `Local plan → subs → synth → review`,
     tokens: 60 + step * 10,

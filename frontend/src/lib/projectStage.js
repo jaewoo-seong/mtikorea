@@ -31,11 +31,24 @@ export const STOP_LABELS = {
   completed_budget: 'Finished — token budget used',
   hours_exhausted: 'Allotted hours reached',
   deadline: 'Due date reached',
+  fast_mode_done: 'Finished — fast mode',
+  auto_done: 'Finished — agent reported the task complete',
+  auto_cycle_cap: 'Finished — auto mode cycle ceiling reached',
   user_stop: 'Stopped by user',
   user_complete: 'Marked complete by user',
   rate_limit: 'OpenRouter rate limit',
   fatal_error: 'Fatal error',
 };
+
+export const BUDGET_MODES = [
+  { key: 'timed', label: 'Timed', hint: 'Runs until a fixed duration you set is used up' },
+  { key: 'fast', label: 'Fast', hint: 'Minimal work, done as soon as possible — a couple of cycles' },
+  { key: 'auto', label: 'Auto', hint: 'No timer — keeps improving until it has nothing more useful to add' },
+];
+
+export function budgetModeLabel(mode) {
+  return BUDGET_MODES.find((m) => m.key === mode)?.label || 'Timed';
+}
 
 export function checkpointOf(project) {
   const cp = project?.checkpoint;

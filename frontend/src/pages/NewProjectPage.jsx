@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { IconAlert, IconClock, IconLoader } from '../lib/icons';
+import { BUDGET_MODES } from '../lib/projectStage';
 
 const PRESETS = [
   { label: '15 min', minutes: 15 },
@@ -36,6 +37,7 @@ export default function NewProjectPage() {
   const [rawNotes, setRawNotes] = useState('');
   const [goal, setGoal] = useState('');
   const [desiredOutput, setDesiredOutput] = useState('');
+  const [budgetMode, setBudgetMode] = useState('timed');
   const [timeBudgetMinutes, setTimeBudgetMinutes] = useState(60);
   const [cleaning, setCleaning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -91,7 +93,8 @@ export default function NewProjectPage() {
         title: title.trim(),
         goal: goal.trim() || rawNotes.trim() || null,
         clientId: clientId || null,
-        timeBudgetMinutes,
+        budgetMode,
+        timeBudgetMinutes: budgetMode === 'timed' ? timeBudgetMinutes : null,
         desiredOutput: desiredOutput.trim() || null,
       });
       if (contextFiles.length) {
@@ -268,44 +271,79 @@ export default function NewProjectPage() {
           <div className="space-y-4">
             <div className="card p-5 space-y-3">
               <p className="card-kicker">Step 4 · Budget</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-muted uppercase tracking-wide inline-flex items-center gap-1.5">
-                  <IconClock width={13} height={13} /> Time budget
-                </span>
-                <span className="font-mono text-sm font-semibold text-ink">
-                  {formatMinutes(timeBudgetMinutes)}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={5}
-                max={720}
-                step={5}
-                value={timeBudgetMinutes}
-                onChange={(e) => setTimeBudgetMinutes(Number(e.target.value))}
-                className="w-full accent-primary"
-              />
-              <div className="flex justify-between text-xs text-muted">
-                <span>5 min</span>
-                <span>12 hours</span>
-              </div>
-              <div className="seg flex-wrap">
-                {PRESETS.map((p) => (
+              <div className="seg flex-wrap w-full">
+                {BUDGET_MODES.map((m) => (
                   <button
-                    key={p.minutes}
+                    key={m.key}
                     type="button"
-                    className={`seg-opt ${timeBudgetMinutes === p.minutes ? 'seg-opt-active' : ''}`}
-                    onClick={() => setTimeBudgetMinutes(p.minutes)}
+                    className={`seg-opt flex-1 ${budgetMode === m.key ? 'seg-opt-active' : ''}`}
+                    onClick={() => setBudgetMode(m.key)}
                   >
-                    {p.label}
+                    {m.label}
                   </button>
                 ))}
               </div>
-              <div className="border border-line bg-surface px-3 py-2 text-xs text-muted flex items-start gap-2">
-                <IconAlert width={13} height={13} className="mt-0.5 shrink-0" />
-                When time runs out, the main agent wraps up instead of stopping mid-thought. No token cap —
-                only this timer limits the loop.
-              </div>
+              <p className="text-xs text-muted">{BUDGET_MODES.find((m) => m.key === budgetMode)?.hint}</p>
+
+              {budgetMode === 'timed' && (
+                <>
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-xs font-medium text-muted uppercase tracking-wide inline-flex items-center gap-1.5">
+                      <IconClock width={13} height={13} /> Time budget
+                    </span>
+                    <span className="font-mono text-sm font-semibold text-ink">
+                      {formatMinutes(timeBudgetMinutes)}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={5}
+                    max={720}
+                    step={5}
+                    value={timeBudgetMinutes}
+                    onChange={(e) => setTimeBudgetMinutes(Number(e.target.value))}
+                    className="w-full accent-primary"
+                  />
+                  <div className="flex justify-between text-xs text-muted">
+                    <span>5 min</span>
+                    <span>12 hours</span>
+                  </div>
+                  <div className="seg flex-wrap">
+                    {PRESETS.map((p) => (
+                      <button
+                        key={p.minutes}
+                        type="button"
+                        className={`seg-opt ${timeBudgetMinutes === p.minutes ? 'seg-opt-active' : ''}`}
+                        onClick={() => setTimeBudgetMinutes(p.minutes)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="border border-line bg-surface px-3 py-2 text-xs text-muted flex items-start gap-2">
+                    <IconAlert width={13} height={13} className="mt-0.5 shrink-0" />
+                    When time runs out, the main agent wraps up instead of stopping mid-thought. No token cap —
+                    only this timer limits the loop.
+                  </div>
+                </>
+              )}
+
+              {budgetMode === 'fast' && (
+                <div className="border border-line bg-surface px-3 py-2 text-xs text-muted flex items-start gap-2">
+                  <IconAlert width={13} height={13} className="mt-0.5 shrink-0" />
+                  Stops after a couple of cycles regardless of how long they take — good for a quick draft
+                  or a small, well-scoped ask.
+                </div>
+              )}
+
+              {budgetMode === 'auto' && (
+                <div className="border border-line bg-surface px-3 py-2 text-xs text-muted flex items-start gap-2">
+                  <IconAlert width={13} height={13} className="mt-0.5 shrink-0" />
+                  No timer — it keeps refining until it genuinely can't think of anything more useful to
+                  add, or hits a high cycle ceiling as a safety net. Can run much longer than a timed
+                  project.
+                </div>
+              )}
             </div>
 
             <div className="card p-5 space-y-2">
@@ -334,8 +372,12 @@ export default function NewProjectPage() {
                   <dd className="text-right">{contextFiles.length}</dd>
                 </div>
                 <div className="flex justify-between gap-4">
-                  <dt className="text-muted">Time budget</dt>
-                  <dd className="font-mono text-right">{formatMinutes(timeBudgetMinutes)}</dd>
+                  <dt className="text-muted">Budget</dt>
+                  <dd className="font-mono text-right">
+                    {budgetMode === 'timed'
+                      ? formatMinutes(timeBudgetMinutes)
+                      : BUDGET_MODES.find((m) => m.key === budgetMode)?.label}
+                  </dd>
                 </div>
               </dl>
             </div>

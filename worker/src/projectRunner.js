@@ -9,15 +9,38 @@ const { runOrchestratorCycle, runWrapUpCycle } = require('./orchestrator');
 const { prepareSubAgentPool, markKeyUsed, markKeyUnhealthy } = require('./lib/keyPool');
 const { recordEvent, setStopReason } = require('./events');
 
-// Reasons that mean "time is up, finish gracefully" — get a wrap-up summary cycle
-// before stopping, rather than an abrupt halt. (rate_limit/fatal_error are not
-// graceful completions and skip straight to stopProject.)
-const TIME_BASED_STOP_REASONS = new Set(['time_budget', 'hours_exhausted', 'deadline']);
+// Reasons that mean "the run finished on its own terms, wrap it up gracefully" —
+// get a final-summary cycle before stopping, rather than an abrupt halt.
+// (rate_limit/fatal_error are not graceful completions and skip straight to
+// stopProject.)
+const TIME_BASED_STOP_REASONS = new Set([
+  'time_budget',
+  'hours_exhausted',
+  'deadline',
+  'fast_mode_done',
+  'auto_done',
+  'auto_cycle_cap',
+]);
+
+function envInt(name, fallback) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
 
 function itersPerClaim() {
   const n = Number(process.env.WORKER_ITERS_PER_CLAIM || 5);
   return Number.isFinite(n) && n > 0 ? Math.min(20, Math.floor(n)) : 5;
 }
+
+// Fast mode: do the smallest useful amount of work and stop — a low fixed
+// cycle count, independent of wall-clock time, is what "as soon as possible"
+// actually means here (a cycle can take anywhere from seconds to minutes).
+const FAST_MODE_MAX_CYCLES = envInt('WORKER_FAST_MODE_MAX_CYCLES', 2);
+
+// Auto mode: no timer. Keep going while the orchestrator is still finding real
+// next work; stop as soon as it reports the task done. This ceiling exists only
+// as a safety net for a run that never calls itself done.
+const AUTO_MODE_MAX_CYCLES = envInt('WORKER_AUTO_MODE_MAX_CYCLES', 60);
 
 function limitsHit(p, now = new Date()) {
   // Legacy per-date deadline (projects created before the time-budget model).
@@ -34,8 +57,11 @@ function limitsHit(p, now = new Date()) {
       };
     }
   }
-  // Current model: a single duration budget, 5 minutes to 12 hours.
-  if (p.time_budget_minutes && p.started_at) {
+  // Duration-budget model: a single time cap, 5 minutes to 12 hours. Gated to
+  // "timed" mode so a leftover value from before a mode switch can't quietly
+  // cut a fast/auto run short.
+  const mode = p.budget_mode || 'timed';
+  if (mode === 'timed' && p.time_budget_minutes && p.started_at) {
     const elapsedMin = (now.getTime() - new Date(p.started_at).getTime()) / 60000;
     if (elapsedMin >= Number(p.time_budget_minutes)) {
       return {
@@ -44,9 +70,38 @@ function limitsHit(p, now = new Date()) {
       };
     }
   }
+
+  // Fast: minimal scope, done as soon as possible — a small fixed cycle count
+  // rather than a clock, since "fast" here means least work, not least time.
+  if (mode === 'fast' && Number(p.agent_iteration || 0) >= FAST_MODE_MAX_CYCLES) {
+    return {
+      reason: 'fast_mode_done',
+      message: `Fast mode: wrapping up after ${p.agent_iteration} cycle(s)`,
+    };
+  }
+
+  // Auto: no timer. Stop when the orchestrator itself reports the task done —
+  // checkpoint.status carries the last cycle's self-reported status — or, if it
+  // never does, when the cycle ceiling below is reached instead.
+  if (mode === 'auto') {
+    if (p.checkpoint?.status === 'done') {
+      return {
+        reason: 'auto_done',
+        message: 'Auto mode: the agent reported the task is complete',
+      };
+    }
+    if (Number(p.agent_iteration || 0) >= AUTO_MODE_MAX_CYCLES) {
+      return {
+        reason: 'auto_cycle_cap',
+        message: `Auto mode: reached the ${AUTO_MODE_MAX_CYCLES}-cycle ceiling without a clean finish`,
+      };
+    }
+  }
+
   // Token budget is intentionally NOT a stop condition — tokens are still recorded
   // (project.tokens_used, project_agent_events.tokens_used) for cost visibility in
-  // Settings, but only the time budget / user Stop / rate limit end a project now.
+  // Settings, but only the time budget / cycle caps / user Stop / rate limit end a
+  // project now.
   return null;
 }
 
@@ -418,7 +473,9 @@ async function runProjectStep(pool, project) {
         durationMs: duration,
       });
 
-      // Soft agent "done" does NOT stop — keep looping until budget
+      // In "timed" mode a soft agent "done" does NOT stop — keep looping until
+      // the timer runs out. In "auto" mode it does: limitsHit() below reads
+      // checkpoint.status straight off this patch.
       p = { ...p, tokens_used: updated.tokens_used, progress_pct: metrics.progressPct, checkpoint: checkpointPatch };
 
       const after = limitsHit(p);
@@ -505,14 +562,16 @@ async function writeCheckpoint(client, projectId, patch) {
 }
 
 /**
- * Time's up: run one focused wrap-up cycle that turns everything done so far into a
- * final summary document, then stop — instead of just halting mid-thought.
+ * The run finished on its own terms — time budget, fast/auto cycle cap, or the
+ * agent calling itself done. Run one focused wrap-up cycle that turns everything
+ * done so far into a final summary document, then stop — instead of just
+ * halting mid-thought.
  */
 async function wrapUpAndStop(client, p, hit, progressPct = null) {
   const cycle = Number(p.agent_iteration || 0) + 1;
   await writeCheckpoint(client, p.id, {
     stage: 'saving',
-    detail: 'Time budget reached — wrapping up with a final summary',
+    detail: `${hit.message} — wrapping up with a final summary`,
     cycle,
   });
   await recordEvent(client, {
@@ -522,7 +581,7 @@ async function wrapUpAndStop(client, p, hit, progressPct = null) {
     stage: 'control',
     action: 'wrap_up_start',
     status: 'started',
-    summary: 'Time budget reached — generating final summary',
+    summary: `${hit.message} — generating final summary`,
     detail: hit.message,
   });
 

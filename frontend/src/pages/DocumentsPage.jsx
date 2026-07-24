@@ -5,7 +5,7 @@ import DocumentPreviewModal from '../components/DocumentPreviewModal';
 import DocumentComposeModal from '../components/DocumentComposeModal';
 import ConfirmButton from '../components/ConfirmButton';
 import { useToast } from '../components/Toast';
-import { IconSearch } from '../lib/icons';
+import { IconSearch, IconTrash, IconFolderInput, IconX } from '../lib/icons';
 
 function buildFolderTree(folders) {
   const byParent = new Map();
@@ -208,9 +208,13 @@ export default function DocumentsPage() {
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [storageUsage, setStorageUsage] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [checkedIds, setCheckedIds] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [moveMenuOpen, setMoveMenuOpen] = useState(false);
   const listRef = useRef(null);
   const fileInputRef = useRef(null);
   const dragMovedRef = useRef(false);
+  const moveMenuRef = useRef(null);
   const toast = useToast();
 
   const folderTree = buildFolderTree(folders);
@@ -225,6 +229,25 @@ export default function DocumentsPage() {
   const docs = documents || [];
   const selected = docs.find((d) => d.id === selectedId) || null;
   const previewDoc = docs.find((d) => d.id === previewId) || null;
+  const checkedCount = checkedIds.size;
+  const allChecked = docs.length > 0 && docs.every((d) => checkedIds.has(d.id));
+
+  function toggleChecked(id) {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleCheckAll() {
+    setCheckedIds((prev) => (prev.size === docs.length ? new Set() : new Set(docs.map((d) => d.id))));
+  }
+
+  function clearSelection() {
+    setCheckedIds(new Set());
+  }
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(searchQ.trim()), 250);
@@ -309,8 +332,18 @@ export default function DocumentsPage() {
   }, []);
 
   useEffect(() => {
+    if (!moveMenuOpen) return undefined;
+    function onDocClick(e) {
+      if (moveMenuRef.current && !moveMenuRef.current.contains(e.target)) setMoveMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [moveMenuOpen]);
+
+  useEffect(() => {
     syncParams();
     load().catch((e) => toast.error(e.message));
+    clearSelection();
   }, [clientId, projectId, folderFilter, debouncedQ]);
 
   useEffect(() => {
@@ -409,11 +442,52 @@ export default function DocumentsPage() {
       toast.success('Document deleted');
       if (previewId === docId) closePreview();
       if (selectedId === docId) setSelectedId(null);
+      setCheckedIds((prev) => {
+        if (!prev.has(docId)) return prev;
+        const next = new Set(prev);
+        next.delete(docId);
+        return next;
+      });
       await Promise.all([load(), loadStorageUsage(), loadFolders()]);
     } catch (err) {
       toast.error(err.message);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function bulkDelete() {
+    const ids = [...checkedIds];
+    if (!ids.length) return;
+    setBulkBusy(true);
+    try {
+      const { deleted } = await api.documents.bulkDelete(ids);
+      toast.success(`Deleted ${deleted} document${deleted === 1 ? '' : 's'}`);
+      if (previewId && checkedIds.has(previewId)) closePreview();
+      if (selectedId && checkedIds.has(selectedId)) setSelectedId(null);
+      clearSelection();
+      await Promise.all([load(), loadStorageUsage(), loadFolders()]);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function bulkMove(folderId) {
+    const ids = [...checkedIds];
+    if (!ids.length) return;
+    setBulkBusy(true);
+    setMoveMenuOpen(false);
+    try {
+      const { moved } = await api.documents.bulkMove(ids, folderId);
+      toast.success(`Moved ${moved} document${moved === 1 ? '' : 's'} to ${folderId ? 'folder' : 'Unfiled'}`);
+      clearSelection();
+      await Promise.all([load(), loadFolders()]);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBulkBusy(false);
     }
   }
 
@@ -636,7 +710,60 @@ export default function DocumentsPage() {
             </div>
           </div>
 
-          {selected && (
+          {checkedCount > 0 && (
+            <div className="px-3 py-2 flex flex-nowrap items-center gap-2 text-sm border-b border-line overflow-x-auto bg-acc-100/60">
+              <span className="font-medium shrink-0">{checkedCount} selected</span>
+              <div className="relative shrink-0" ref={moveMenuRef}>
+                <button
+                  type="button"
+                  className="btn-secondary text-xs py-1 inline-flex items-center gap-1.5"
+                  disabled={bulkBusy}
+                  onClick={() => setMoveMenuOpen((v) => !v)}
+                >
+                  <IconFolderInput width={13} height={13} /> Move to…
+                </button>
+                {moveMenuOpen && (
+                  <div className="absolute z-20 top-full left-0 mt-1 bg-canvas border border-line-strong shadow-mid min-w-[180px] max-h-64 overflow-y-auto">
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-black/[0.03]"
+                      onClick={() => bulkMove(null)}
+                    >
+                      Unfiled
+                    </button>
+                    {flatFolderOptions.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-black/[0.03]"
+                        onClick={() => bulkMove(f.id)}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <ConfirmButton
+                onConfirm={bulkDelete}
+                pending={bulkBusy}
+                className="btn-ghost text-xs py-1 text-danger shrink-0 inline-flex items-center gap-1.5"
+                confirmClassName="btn-danger text-xs py-1"
+                confirmLabel={`Delete ${checkedCount}`}
+              >
+                <IconTrash width={13} height={13} /> Delete {checkedCount}
+              </ConfirmButton>
+              <button
+                type="button"
+                className="btn-ghost text-xs py-1 ml-auto shrink-0 inline-flex items-center gap-1"
+                onClick={clearSelection}
+              >
+                <IconX width={12} height={12} /> Clear
+              </button>
+            </div>
+          )}
+
+          {selected && !checkedCount && (
             <div className="px-3 py-2 flex flex-nowrap items-center gap-2 text-sm border-b border-line overflow-x-auto bg-surface/50">
               <span className="font-display font-semibold truncate max-w-[200px] shrink-0">{selected.title}</span>
               <span className={`${fileKind(selected.mime_type).tone} shrink-0`}>{fileKind(selected.mime_type).label}</span>
@@ -702,18 +829,29 @@ export default function DocumentsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-line-strong text-left text-xs font-semibold uppercase tracking-wide text-neutral-800 sticky top-0 bg-neutral-300">
+                    <th className="pl-3 pr-1 py-2 w-8">
+                      <input
+                        type="checkbox"
+                        className="accent-primary align-middle"
+                        checked={allChecked}
+                        onChange={toggleCheckAll}
+                        aria-label="Select all documents"
+                      />
+                    </th>
                     <th className="px-3 py-2 font-semibold">Title</th>
                     <th className="px-3 py-2 font-semibold w-20">Type</th>
                     <th className="px-3 py-2 font-semibold hidden md:table-cell">Project</th>
                     <th className="px-3 py-2 font-semibold hidden lg:table-cell">Client</th>
                     <th className="px-3 py-2 font-semibold w-24 text-right">Size</th>
                     <th className="px-3 py-2 font-semibold w-28 hidden sm:table-cell">Updated</th>
+                    <th className="px-3 py-2 font-semibold w-10" />
                   </tr>
                 </thead>
                 <tbody>
                   {docs.map((d) => {
                     const kind = fileKind(d.mime_type);
                     const active = d.id === selectedId;
+                    const checked = checkedIds.has(d.id);
                     return (
                       <tr
                         key={d.id}
@@ -728,14 +866,23 @@ export default function DocumentsPage() {
                             dragMovedRef.current = false;
                           }, 0);
                         }}
-                        className={`border-b border-line last:border-0 cursor-pointer ${
-                          active ? 'bg-primary/[0.06]' : 'hover:bg-black/[0.02]'
+                        className={`group border-b border-line last:border-0 cursor-pointer ${
+                          checked ? 'bg-acc-100/60' : active ? 'bg-primary/[0.06]' : 'hover:bg-black/[0.02]'
                         }`}
                         onClick={() => {
                           if (dragMovedRef.current) return;
                           openPreview(d.id);
                         }}
                       >
+                        <td className="pl-3 pr-1 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            className="accent-primary align-middle"
+                            checked={checked}
+                            onChange={() => toggleChecked(d.id)}
+                            aria-label={`Select ${d.title}`}
+                          />
+                        </td>
                         <td className="px-3 py-2.5 min-w-0">
                           <div className="font-medium truncate max-w-[280px]">{d.title}</div>
                           {d.filename && (
@@ -756,6 +903,16 @@ export default function DocumentsPage() {
                         </td>
                         <td className="px-3 py-2.5 hidden sm:table-cell text-xs text-muted whitespace-nowrap">
                           {formatDate(d.updated_at || d.created_at)}
+                        </td>
+                        <td className="px-1 py-2.5 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          <ConfirmButton
+                            onConfirm={() => deleteDocument(d.id)}
+                            pending={deleting}
+                            className="p-1 text-muted opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-danger transition-opacity inline-flex"
+                            confirmClassName="btn-danger text-xs py-0.5 px-1.5"
+                          >
+                            <IconTrash width={14} height={14} aria-label={`Delete ${d.title}`} />
+                          </ConfirmButton>
                         </td>
                       </tr>
                     );

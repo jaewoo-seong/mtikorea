@@ -10,6 +10,7 @@ const { cleanPrompt } = require('../lib/llm');
 
 const MIN_TIME_BUDGET_MINUTES = 5;
 const MAX_TIME_BUDGET_MINUTES = 720; // 12 hours
+const BUDGET_MODES = ['timed', 'fast', 'auto'];
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const router = express.Router();
@@ -203,10 +204,16 @@ router.post('/clean-prompt', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
-    const { title, goal, clientId, timeBudgetMinutes, desiredOutput } = req.body || {};
+    const { title, goal, clientId, timeBudgetMinutes, desiredOutput, budgetMode } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title required' });
+
+    const mode = budgetMode && BUDGET_MODES.includes(budgetMode) ? budgetMode : 'timed';
+
+    // Fast/auto bound themselves by cycle count instead of the clock (see
+    // worker/projectRunner.js limitsHit) — a wall-clock timer isn't part of
+    // what those modes mean, so silently drop one if it's sent.
     let minutes = null;
-    if (timeBudgetMinutes != null && timeBudgetMinutes !== '') {
+    if (mode === 'timed' && timeBudgetMinutes != null && timeBudgetMinutes !== '') {
       minutes = Math.round(Number(timeBudgetMinutes));
       if (
         !Number.isFinite(minutes) ||
@@ -220,14 +227,15 @@ router.post('/', async (req, res, next) => {
     }
     const { rows } = await query(
       `INSERT INTO projects (
-         org_id, client_id, title, goal, time_budget_minutes, desired_output, created_by, status
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'draft') RETURNING *`,
+         org_id, client_id, title, goal, time_budget_minutes, budget_mode, desired_output, created_by, status
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'draft') RETURNING *`,
       [
         req.user.org_id,
         clientId || null,
         title,
         goal || null,
         minutes,
+        mode,
         desiredOutput || null,
         req.user.id,
       ]
@@ -241,6 +249,9 @@ router.post('/', async (req, res, next) => {
 router.patch('/:id', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
+    if (req.body?.budgetMode !== undefined && !BUDGET_MODES.includes(req.body.budgetMode)) {
+      return res.status(400).json({ error: `budgetMode must be one of: ${BUDGET_MODES.join(', ')}` });
+    }
     const map = {
       title: 'title',
       goal: 'goal',
@@ -249,6 +260,7 @@ router.patch('/:id', async (req, res, next) => {
       allottedHours: 'allotted_hours',
       dueAt: 'due_at',
       timeBudgetMinutes: 'time_budget_minutes',
+      budgetMode: 'budget_mode',
       desiredOutput: 'desired_output',
     };
     const updates = [];
@@ -258,6 +270,17 @@ router.patch('/:id', async (req, res, next) => {
         params.push(req.body[key] === '' ? null : req.body[key]);
         updates.push(`${col} = $${params.length}`);
       }
+    }
+    // Switching away from "timed" retires its clock too — otherwise a leftover
+    // time_budget_minutes from before the switch would silently keep gating
+    // fast/auto's claimability (claim_next_project treats it as a real cap).
+    if (
+      req.body?.budgetMode !== undefined &&
+      req.body.budgetMode !== 'timed' &&
+      req.body.timeBudgetMinutes === undefined
+    ) {
+      params.push(null);
+      updates.push(`time_budget_minutes = $${params.length}`);
     }
     if (!updates.length) return res.status(400).json({ error: 'No fields' });
     params.push(req.params.id, req.user.org_id);
