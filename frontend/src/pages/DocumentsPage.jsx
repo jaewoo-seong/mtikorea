@@ -343,7 +343,7 @@ export default function DocumentsPage() {
       <div>
         <h1 className="text-3xl">Shared documents</h1>
         <p className="text-sm text-muted mt-1">
-          Approved library only. Agent outputs stay hidden in project staging until someone clicks Approve.
+          Approved library only. Pending and rejected agent outputs stay on the project page (hidden here).
           Title = document ID for references. Link to client / project either way.
         </p>
       </div>

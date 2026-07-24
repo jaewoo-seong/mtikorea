@@ -27,7 +27,9 @@ router.get('/', async (req, res, next) => {
         (SELECT COUNT(*)::int FROM agent_work_log w WHERE w.project_id = p.id) AS log_count,
         (SELECT COUNT(*)::int FROM project_files f WHERE f.project_id = p.id) AS file_count,
         (SELECT COUNT(*)::int FROM agent_task_results r WHERE r.project_id = p.id) AS result_count,
-        (SELECT COUNT(*)::int FROM shared_documents d WHERE d.project_id = p.id) AS document_count
+        (SELECT COUNT(*)::int FROM shared_documents d WHERE d.project_id = p.id) AS document_count,
+        (SELECT COUNT(*)::int FROM shared_documents d
+          WHERE d.project_id = p.id AND d.visibility = 'staged') AS pending_count
        FROM projects p
        LEFT JOIN clients c ON c.id = p.client_id
        LEFT JOIN users u ON u.id = p.created_by
@@ -72,6 +74,11 @@ router.get('/:id', async (req, res, next) => {
        FROM shared_documents WHERE project_id = $1 AND visibility = 'staged' ORDER BY created_at DESC`,
       [req.params.id]
     );
+    const rejected = await query(
+      `SELECT id, title, filename, mime_type, size_bytes, description, created_at, visibility, source, rejected_at
+       FROM shared_documents WHERE project_id = $1 AND visibility = 'rejected' ORDER BY rejected_at DESC NULLS LAST, created_at DESC`,
+      [req.params.id]
+    );
     const messages = await query(
       `SELECT m.*, d.title AS document_title
        FROM project_messages m
@@ -107,6 +114,7 @@ router.get('/:id', async (req, res, next) => {
       files: files.rows,
       documents: docs.rows,
       stagedDocuments: staged.rows,
+      rejectedDocuments: rejected.rows,
       messages: messages.rows,
       tasks: tasks.rows,
       logs: logs.rows.reverse(),
@@ -331,6 +339,8 @@ router.post('/:id/staged/approve-all', async (req, res, next) => {
          visibility = 'shared',
          approved_at = now(),
          approved_by = $3,
+         rejected_at = NULL,
+         rejected_by = NULL,
          updated_at = now()
        WHERE project_id = $1 AND org_id = $2 AND visibility = 'staged'
        RETURNING id`,
@@ -346,8 +356,14 @@ router.post('/:id/staged/reject-all', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
     const { rows } = await query(
-      `DELETE FROM shared_documents WHERE project_id = $1 AND org_id = $2 AND visibility = 'staged' RETURNING id`,
-      [req.params.id, req.user.org_id]
+      `UPDATE shared_documents SET
+         visibility = 'rejected',
+         rejected_at = now(),
+         rejected_by = $3,
+         updated_at = now()
+       WHERE project_id = $1 AND org_id = $2 AND visibility = 'staged'
+       RETURNING id`,
+      [req.params.id, req.user.org_id, req.user.id]
     );
     res.json({ ok: true, rejected: rows.length });
   } catch (err) {

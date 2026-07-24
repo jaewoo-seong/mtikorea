@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { checkpointOf, formatBudgetMinutes, stageLabel, stopLabel } from '../lib/projectStage';
 import { IconClock } from '../lib/icons';
-import ConfirmButton from '../components/ConfirmButton';
-import { useToast } from '../components/Toast';
 
 const STATUS_FILTERS = ['all', 'running', 'paused', 'draft', 'completed', 'failed'];
 
@@ -53,15 +51,22 @@ function dateLabel(iso) {
   return `${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${time}`;
 }
 
+function cardBorderTone(status) {
+  if (status === 'running') return 'border-l-primary';
+  if (status === 'paused') return 'border-l-neutral-400';
+  if (status === 'failed') return 'border-l-danger';
+  return 'border-l-transparent';
+}
+
 export default function ProjectsPage() {
+  const navigate = useNavigate();
   const [projects, setProjects] = useState(null);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [lastRefresh, setLastRefresh] = useState(null);
-  const [deletingId, setDeletingId] = useState(null);
   const [, forceTick] = useState(0);
-  const toast = useToast();
 
   async function load() {
     const p = await api.projects.list();
@@ -75,34 +80,21 @@ export default function ProjectsPage() {
     return () => clearInterval(t);
   }, []);
 
-  // Tick every second so the "updated Xs ago" label stays fresh without refetching.
   useEffect(() => {
     const t = setInterval(() => forceTick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, []);
-
-  async function removeProject(p) {
-    setDeletingId(p.id);
-    try {
-      await api.projects.delete(p.id);
-      toast.success(`Deleted "${p.title}"`);
-      await load();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setDeletingId(null);
-    }
-  }
 
   const filtered = useMemo(() => {
     if (!projects) return [];
     const q = search.trim().toLowerCase();
     return projects.filter((p) => {
       if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+      if (needsReviewOnly && !(Number(p.pending_count) > 0)) return false;
       if (q && !`${p.title} ${p.client_name || ''}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [projects, statusFilter, search]);
+  }, [projects, statusFilter, needsReviewOnly, search]);
 
   const loading = projects === null;
 
@@ -116,7 +108,9 @@ export default function ProjectsPage() {
             until it hits the budget or you stop it.
           </p>
         </div>
-        <Link className="btn-primary" to="/projects/new">+ New project</Link>
+        <Link className="btn-primary" to="/projects/new">
+          + New project
+        </Link>
       </div>
 
       {error && <p className="text-danger text-sm">{error}</p>}
@@ -129,12 +123,25 @@ export default function ProjectsPage() {
               type="button"
               onClick={() => setStatusFilter(s)}
               className={`text-sm capitalize pb-1 border-b-2 -mb-[13px] transition ${
-                statusFilter === s ? 'border-primary text-primary font-medium' : 'border-transparent text-muted hover:text-ink'
+                statusFilter === s
+                  ? 'border-primary text-primary font-medium'
+                  : 'border-transparent text-muted hover:text-ink'
               }`}
             >
               {s}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setNeedsReviewOnly((v) => !v)}
+            className={`text-sm pb-1 border-b-2 -mb-[13px] transition ${
+              needsReviewOnly
+                ? 'border-primary text-primary font-medium'
+                : 'border-transparent text-muted hover:text-ink'
+            }`}
+          >
+            Needs review
+          </button>
           <input
             className="input py-1 text-xs w-48"
             placeholder="Search title / client…"
@@ -144,10 +151,14 @@ export default function ProjectsPage() {
         </div>
         {!loading && (
           <div className="flex items-center gap-1.5 text-[11px] text-muted">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/50" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-            </span>
+            {projects.some((p) => p.status === 'running') ? (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/50" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+              </span>
+            ) : (
+              <span className="inline-flex h-2 w-2 rounded-full bg-neutral-400" />
+            )}
             Updated {timeAgo(lastRefresh) || 'just now'}
           </div>
         )}
@@ -171,18 +182,42 @@ export default function ProjectsPage() {
               p.time_budget_minutes != null
                 ? Math.max(0, p.time_budget_minutes - Math.round((pct / 100) * p.time_budget_minutes))
                 : null;
+            const pending = Number(p.pending_count) || 0;
             return (
-              <Link key={p.id} to={`/projects/${p.id}`} className="card blueprint p-3 hover:border-primary group min-w-0">
-                <span className="corner tl" /><span className="corner tr" /><span className="corner bl" /><span className="corner br" />
-                <div className="flex items-center justify-between gap-2">
-                  <StatusTag status={p.status} />
+              <article
+                key={p.id}
+                role="link"
+                tabIndex={0}
+                onClick={() => navigate(`/projects/${p.id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    navigate(`/projects/${p.id}`);
+                  }
+                }}
+                className={`card blueprint p-3 hover:border-primary group min-w-0 cursor-pointer border-l-4 ${cardBorderTone(p.status)}`}
+              >
+                <span className="corner tl" />
+                <span className="corner tr" />
+                <span className="corner bl" />
+                <span className="corner br" />
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <StatusTag status={p.status} />
+                    {stage && <span className="text-[11px] text-muted">{stageLabel(stage)}</span>}
+                    {pending > 0 && (
+                      <span className="badge-outline text-[10px]">
+                        {pending} pending
+                      </span>
+                    )}
+                  </div>
                   <span className="text-[11px] text-muted shrink-0">{dateLabel(p.created_at)}</span>
                 </div>
                 <h2 className="card-title mt-1.5 truncate group-hover:text-primary transition">{p.title}</h2>
                 <p className="card-body line-clamp-2 min-h-[2.2rem]">{p.goal || 'No goal set'}</p>
 
                 <div className="flex items-center justify-between text-[11px] text-muted">
-                  <span>{stage ? stageLabel(stage) : p.status === 'completed' ? 'Done' : '—'}</span>
+                  <span>{p.client_name || 'No client'}</span>
                   <span>{p.creator_name || 'You'}</span>
                 </div>
 
@@ -193,42 +228,37 @@ export default function ProjectsPage() {
                 <div className="pt-2 border-t border-line space-y-1.5">
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-muted inline-flex items-center gap-1">
-                      <IconClock width={10} height={10} /> Time budget
+                      <IconClock width={10} height={10} /> Time
                     </span>
                     <span className="font-mono">
                       {p.time_budget_minutes != null
                         ? `${formatBudgetMinutes(remainingMin)} left`
                         : p.allotted_hours != null
                           ? `${p.allotted_hours}h allotted (legacy)`
-                          : 'No budget set'}
+                          : 'No budget'}
                     </span>
                   </div>
                   {p.time_budget_minutes != null && (
                     <div className="h-1 bg-neutral-200 overflow-hidden">
-                      <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                      <div
+                        className={`h-full bg-primary ${p.status === 'running' ? 'animate-pulse' : ''}`}
+                        style={{ width: `${pct}%` }}
+                      />
                     </div>
                   )}
-                  <div className="flex items-center justify-between text-[11px] pt-0.5">
-                    <span className="text-muted">Tokens used</span>
+                  <div className="flex items-center justify-between text-[11px] pt-0.5 text-muted">
+                    <span>Tokens</span>
                     <span className="font-mono">
                       {Number(p.tokens_used || 0).toLocaleString()}
-                      {p.token_budget != null ? ` / ${Number(p.token_budget).toLocaleString()}` : ' (no cap)'}
+                      {p.token_budget != null ? ` / ${Number(p.token_budget).toLocaleString()}` : ''}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <ConfirmButton
-                    onConfirm={() => removeProject(p)}
-                    pending={deletingId === p.id}
-                    pendingLabel="Deleting…"
-                    className="text-xs text-muted hover:text-danger"
-                  >
-                    Delete
-                  </ConfirmButton>
+                <div className="flex justify-end pt-1">
                   <span className="font-display font-semibold text-sm text-primary">Open ›</span>
                 </div>
-              </Link>
+              </article>
             );
           })}
         </div>

@@ -169,7 +169,7 @@ router.get('/', async (req, res, next) => {
   try {
     const { clientId, projectId, q, visibility, folderId } = req.query;
     const params = [req.user.org_id];
-    // Default: only approved shared docs (hide staged temp outputs)
+    // Default: only approved shared docs (hide staged + rejected project outputs)
     const vis = visibility || 'shared';
     let sql = `
       SELECT d.*, c.name AS client_name, u.name AS uploader_name, p.title AS project_title
@@ -318,12 +318,14 @@ router.post('/:id/approve', async (req, res, next) => {
          visibility = 'shared',
          approved_at = now(),
          approved_by = $3,
+         rejected_at = NULL,
+         rejected_by = NULL,
          updated_at = now()
-       WHERE id = $1 AND org_id = $2 AND visibility = 'staged'
+       WHERE id = $1 AND org_id = $2 AND visibility IN ('staged', 'rejected')
        RETURNING *`,
       [req.params.id, req.user.org_id, req.user.id]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Staged document not found' });
+    if (!rows[0]) return res.status(404).json({ error: 'Pending or rejected document not found' });
     res.json({ document: rows[0] });
   } catch (err) {
     next(err);
@@ -334,11 +336,17 @@ router.post('/:id/reject', async (req, res, next) => {
   try {
     if (req.user.role === 'viewer') return res.status(403).json({ error: 'Forbidden' });
     const { rows } = await query(
-      `DELETE FROM shared_documents WHERE id = $1 AND org_id = $2 AND visibility = 'staged' RETURNING id`,
-      [req.params.id, req.user.org_id]
+      `UPDATE shared_documents SET
+         visibility = 'rejected',
+         rejected_at = now(),
+         rejected_by = $3,
+         updated_at = now()
+       WHERE id = $1 AND org_id = $2 AND visibility = 'staged'
+       RETURNING *`,
+      [req.params.id, req.user.org_id, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Staged document not found' });
-    res.json({ ok: true });
+    res.json({ document: rows[0] });
   } catch (err) {
     next(err);
   }
