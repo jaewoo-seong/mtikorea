@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useToast } from '../components/Toast';
-import DocumentPreview from '../components/DocumentPreview';
+import DocumentPreviewModal from '../components/DocumentPreviewModal';
 import ConfirmButton from '../components/ConfirmButton';
 import {
   PIPELINE,
@@ -220,15 +220,17 @@ export default function ProjectDetailPage() {
   const [expandedEvent, setExpandedEvent] = useState(null);
   const [expandedMainStage, setExpandedMainStage] = useState(null);
   const [collapsedCycles, setCollapsedCycles] = useState(() => new Set());
-  const [expandedDocIds, setExpandedDocIds] = useState(() => new Set());
+  const [previewId, setPreviewId] = useState(null);
+  const [previewSiblings, setPreviewSiblings] = useState([]);
 
-  function toggleDocPreview(docId) {
-    setExpandedDocIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(docId)) next.delete(docId);
-      else next.add(docId);
-      return next;
-    });
+  function openDocPreview(docId, siblings) {
+    setPreviewId(docId);
+    setPreviewSiblings(siblings);
+  }
+
+  function closeDocPreview() {
+    setPreviewId(null);
+    setPreviewSiblings([]);
   }
 
   async function load() {
@@ -436,6 +438,17 @@ export default function ProjectDetailPage() {
     eventGroups.push({ id: `${e.cycle}-${occurrence}`, cycle: e.cycle, items: [e] });
   }
 
+  const allProjectDocs = [...stagedDocuments, ...documents, ...rejectedDocuments];
+  const previewDoc = previewId ? allProjectDocs.find((d) => d.id === previewId) : null;
+  // Keep siblings in sync with live lists after approve/reject
+  const liveSiblings = (() => {
+    if (!previewId) return previewSiblings;
+    if (stagedDocuments.some((d) => d.id === previewId)) return stagedDocuments;
+    if (documents.some((d) => d.id === previewId)) return documents;
+    if (rejectedDocuments.some((d) => d.id === previewId)) return rejectedDocuments;
+    return previewSiblings;
+  })();
+
   const documentsPanel = (
     <div className="card p-5 min-w-0 space-y-6">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -501,19 +514,14 @@ export default function ProjectDetailPage() {
                 <button
                   type="button"
                   className="btn-ghost text-xs py-1"
-                  onClick={() => toggleDocPreview(d.id)}
+                  onClick={() => openDocPreview(d.id, stagedDocuments)}
                 >
-                  {expandedDocIds.has(d.id) ? 'Hide preview' : 'Preview'}
+                  Preview
                 </button>
                 <a className="btn-ghost text-xs py-1" href={`/api/documents/${d.id}/export/docx`} download>
                   Export Word
                 </a>
               </div>
-              {expandedDocIds.has(d.id) && (
-                <div className="pt-2 mt-2 border-t border-line">
-                  <DocumentPreview documentId={d.id} />
-                </div>
-              )}
             </div>
           ))}
           {!stagedDocuments.length && (
@@ -541,9 +549,9 @@ export default function ProjectDetailPage() {
                 <button
                   type="button"
                   className="text-xs text-primary font-medium hover:underline"
-                  onClick={() => toggleDocPreview(d.id)}
+                  onClick={() => openDocPreview(d.id, documents)}
                 >
-                  {expandedDocIds.has(d.id) ? 'Hide' : 'Preview'}
+                  Preview
                 </button>
                 <a className="text-xs text-primary font-medium hover:underline" href={`/api/documents/${d.id}/download`}>
                   Download
@@ -556,11 +564,6 @@ export default function ProjectDetailPage() {
                   Export Word
                 </a>
               </div>
-              {expandedDocIds.has(d.id) && (
-                <div className="pt-2 mt-2 border-t border-line">
-                  <DocumentPreview documentId={d.id} />
-                </div>
-              )}
             </div>
           ))}
           {!documents.length && (
@@ -597,19 +600,14 @@ export default function ProjectDetailPage() {
                 <button
                   type="button"
                   className="btn-ghost text-xs py-1"
-                  onClick={() => toggleDocPreview(d.id)}
+                  onClick={() => openDocPreview(d.id, rejectedDocuments)}
                 >
-                  {expandedDocIds.has(d.id) ? 'Hide preview' : 'Preview'}
+                  Preview
                 </button>
                 <a className="btn-ghost text-xs py-1" href={`/api/documents/${d.id}/download`}>
                   Download
                 </a>
               </div>
-              {expandedDocIds.has(d.id) && (
-                <div className="pt-2 mt-2 border-t border-line">
-                  <DocumentPreview documentId={d.id} />
-                </div>
-              )}
             </div>
           ))}
           {!rejectedDocuments.length && <p className="text-sm text-muted">No rejected documents</p>}
@@ -1350,6 +1348,15 @@ export default function ProjectDetailPage() {
 
         {nudgeDock}
       </div>
+
+      {previewDoc && (
+        <DocumentPreviewModal
+          document={previewDoc}
+          siblings={liveSiblings}
+          onClose={closeDocPreview}
+          onNavigate={(nextId) => setPreviewId(nextId)}
+        />
+      )}
     </div>
   );
 }

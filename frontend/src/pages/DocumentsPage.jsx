@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
-import DocumentPreview from '../components/DocumentPreview';
+import DocumentPreviewModal from '../components/DocumentPreviewModal';
 import ConfirmButton from '../components/ConfirmButton';
 import BlueprintCorners from '../components/BlueprintCorners';
 import { useToast } from '../components/Toast';
+import { IconSearch } from '../lib/icons';
 
 function buildFolderTree(folders) {
   const byParent = new Map();
@@ -81,11 +82,20 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
             onBlur={commitRename}
             onKeyDown={(e) => {
               if (e.key === 'Enter') commitRename();
-              if (e.key === 'Escape') { setName(folder.name); setEditing(false); }
+              if (e.key === 'Escape') {
+                setName(folder.name);
+                setEditing(false);
+              }
             }}
           />
         ) : (
-          <span className="truncate flex-1 min-w-0" onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}>
+          <span
+            className="truncate flex-1 min-w-0"
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setEditing(true);
+            }}
+          >
             {folder.name}
           </span>
         )}
@@ -95,14 +105,14 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
             type="button"
             title="New subfolder"
             className="text-muted hover:text-primary px-1"
-            onClick={(e) => { e.stopPropagation(); onAddChild(folder.id); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onAddChild(folder.id);
+            }}
           >
             +
           </button>
-          <ConfirmButton
-            onConfirm={() => onDelete(folder.id)}
-            className="text-muted hover:text-danger px-1"
-          >
+          <ConfirmButton onConfirm={() => onDelete(folder.id)} className="text-muted hover:text-danger px-1">
             ×
           </ConfirmButton>
         </div>
@@ -136,6 +146,19 @@ function formatBytes(bytes) {
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
+function formatDate(value) {
+  if (!value) return '—';
+  try {
+    return new Date(value).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  } catch {
+    return '—';
+  }
+}
+
 function fileKind(mimeType) {
   if (!mimeType) return { label: 'File', tone: 'badge-neutral' };
   if (mimeType.startsWith('image/')) return { label: 'Image', tone: 'badge-accent2' };
@@ -152,17 +175,11 @@ function fileKind(mimeType) {
   return { label: 'File', tone: 'badge-neutral' };
 }
 
-function SkeletonCard() {
+function isTextish(mimeType) {
   return (
-    <div className="card p-4 animate-pulse space-y-3">
-      <div className="h-4 w-2/3 bg-neutral-200" />
-      <div className="h-3 w-1/2 bg-neutral-200" />
-      <div className="flex gap-2">
-        <div className="h-5 w-16 bg-neutral-200" />
-        <div className="h-5 w-16 bg-neutral-200" />
-      </div>
-      <div className="h-8 bg-neutral-200" />
-    </div>
+    mimeType?.startsWith('text/') ||
+    mimeType === 'application/json' ||
+    (mimeType || '').includes('markdown')
   );
 }
 
@@ -172,18 +189,24 @@ export default function DocumentsPage() {
   const [clients, setClients] = useState([]);
   const [projects, setProjects] = useState([]);
   const [folders, setFolders] = useState([]);
-  const [folderFilter, setFolderFilter] = useState('all'); // 'all' | 'root' | folder id
+  const [folderFilter, setFolderFilter] = useState('all');
   const [unfiledDragOver, setUnfiledDragOver] = useState(false);
   const [clientId, setClientId] = useState(searchParams.get('clientId') || '');
   const [projectId, setProjectId] = useState(searchParams.get('projectId') || '');
+  const [searchQ, setSearchQ] = useState(searchParams.get('q') || '');
+  const [debouncedQ, setDebouncedQ] = useState(searchQ);
+  const [selectedId, setSelectedId] = useState(null);
+  const [previewId, setPreviewId] = useState(searchParams.get('preview') || null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [foldersOpen, setFoldersOpen] = useState(false);
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
-  const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [storageUsage, setStorageUsage] = useState(null);
   const [composing, setComposing] = useState(false);
   const [composeTitle, setComposeTitle] = useState('');
   const [composeContent, setComposeContent] = useState('');
   const [composeSaving, setComposeSaving] = useState(false);
+  const listRef = useRef(null);
   const toast = useToast();
 
   const folderTree = buildFolderTree(folders);
@@ -194,6 +217,31 @@ export default function DocumentsPage() {
       flatten(f.children, depth + 1);
     }
   })(folderTree, 0);
+
+  const docs = documents || [];
+  const selected = docs.find((d) => d.id === selectedId) || null;
+  const previewDoc = docs.find((d) => d.id === previewId) || null;
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(searchQ.trim()), 250);
+    return () => clearTimeout(t);
+  }, [searchQ]);
+
+  const syncParams = useCallback(
+    (overrides = {}) => {
+      const next = {};
+      const c = 'clientId' in overrides ? overrides.clientId : clientId;
+      const p = 'projectId' in overrides ? overrides.projectId : projectId;
+      const q = 'q' in overrides ? overrides.q : debouncedQ;
+      const prev = 'preview' in overrides ? overrides.preview : previewId;
+      if (c) next.clientId = c;
+      if (p) next.projectId = p;
+      if (q) next.q = q;
+      if (prev) next.preview = prev;
+      setSearchParams(next, { replace: true });
+    },
+    [clientId, projectId, debouncedQ, previewId, setSearchParams]
+  );
 
   async function loadFolders() {
     const { folders: rows } = await api.documentFolders.list();
@@ -231,21 +279,13 @@ export default function DocumentsPage() {
     }
   }
 
-  function togglePreview(docId) {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(docId)) next.delete(docId);
-      else next.add(docId);
-      return next;
-    });
-  }
-
   async function load() {
     const [d, c, p] = await Promise.all([
       api.documents.list({
         clientId: clientId || undefined,
         projectId: projectId || undefined,
         folderId: folderFilter === 'all' ? undefined : folderFilter,
+        q: debouncedQ || undefined,
       }),
       api.clients.list(),
       api.projects.list(),
@@ -265,12 +305,58 @@ export default function DocumentsPage() {
   }, []);
 
   useEffect(() => {
-    const next = {};
-    if (clientId) next.clientId = clientId;
-    if (projectId) next.projectId = projectId;
-    setSearchParams(next, { replace: true });
+    syncParams();
     load().catch((e) => toast.error(e.message));
-  }, [clientId, projectId, folderFilter]);
+  }, [clientId, projectId, folderFilter, debouncedQ]);
+
+  // Keep selection valid when list changes; open preview from URL if present
+  useEffect(() => {
+    if (!documents) return;
+    if (selectedId && !documents.some((d) => d.id === selectedId)) {
+      setSelectedId(documents[0]?.id || null);
+    }
+    if (previewId && !documents.some((d) => d.id === previewId)) {
+      // Keep URL preview until list loads matching doc, or clear if list loaded empty of it
+      if (documents.length) {
+        setPreviewId(null);
+        syncParams({ preview: null });
+      }
+    }
+  }, [documents]);
+
+  function openPreview(docId) {
+    setSelectedId(docId);
+    setPreviewId(docId);
+    syncParams({ preview: docId });
+  }
+
+  function closePreview() {
+    setPreviewId(null);
+    syncParams({ preview: null });
+  }
+
+  function navigatePreview(docId) {
+    setSelectedId(docId);
+    setPreviewId(docId);
+    syncParams({ preview: docId });
+  }
+
+  function onListKeyDown(e) {
+    if (!docs.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const idx = docs.findIndex((d) => d.id === selectedId);
+      let next = idx;
+      if (e.key === 'ArrowDown') next = Math.min(docs.length - 1, Math.max(0, idx + 1));
+      if (e.key === 'ArrowUp') next = Math.max(0, idx < 0 ? 0 : idx - 1);
+      setSelectedId(docs[next].id);
+      return;
+    }
+    if (e.key === 'Enter' && selectedId) {
+      e.preventDefault();
+      openPreview(selectedId);
+    }
+  }
 
   async function upload(e) {
     e.preventDefault();
@@ -309,6 +395,7 @@ export default function DocumentsPage() {
       setComposeTitle('');
       setComposeContent('');
       setComposing(false);
+      setAddOpen(false);
       await Promise.all([load(), loadStorageUsage()]);
     } catch (err) {
       toast.error(err.message);
@@ -338,269 +425,351 @@ export default function DocumentsPage() {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl">Shared documents</h1>
-        <p className="text-sm text-muted mt-1">
-          Approved library only. Pending and rejected agent outputs stay on the project page (hidden here).
-          Title = document ID for references. Link to client / project either way.
-        </p>
+  const folderPanel = (
+    <div className="card blueprint p-3 min-w-0 h-full">
+      <BlueprintCorners />
+      <div className="flex items-center justify-between px-1.5 mb-1">
+        <span className="card-kicker">Folders</span>
+        <button
+          type="button"
+          title="New folder"
+          className="btn-ghost text-xs px-1"
+          onClick={() => createFolder(folderFilter !== 'all' && folderFilter !== 'root' ? folderFilter : null)}
+        >
+          + New
+        </button>
       </div>
-
-      <div className="grid lg:grid-cols-[240px_1fr] gap-5 items-start">
-        <div className="card blueprint p-3 min-w-0">
-          <BlueprintCorners />
-          <div className="flex items-center justify-between px-1.5 mb-1">
-            <span className="card-kicker">Folders</span>
-            <button
-              type="button"
-              title="New folder"
-              className="btn-ghost text-xs px-1"
-              onClick={() => createFolder(folderFilter !== 'all' && folderFilter !== 'root' ? folderFilter : null)}
-            >
-              + New
-            </button>
-          </div>
-          <div
-            className={`px-1.5 py-1 text-sm cursor-pointer ${folderFilter === 'all' ? 'bg-acc-100 text-primary' : 'hover:bg-black/[0.03]'}`}
-            onClick={() => setFolderFilter('all')}
-          >
-            All documents
-          </div>
-          <div
-            className={`px-1.5 py-1 text-sm cursor-pointer ${
-              unfiledDragOver
-                ? 'bg-acc-100 outline outline-1 outline-primary'
-                : folderFilter === 'root'
-                  ? 'bg-acc-100 text-primary'
-                  : 'hover:bg-black/[0.03]'
-            }`}
-            onClick={() => setFolderFilter('root')}
-            onDragOver={(e) => e.preventDefault()}
-            onDragEnter={(e) => { e.preventDefault(); setUnfiledDragOver(true); }}
-            onDragLeave={() => setUnfiledDragOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setUnfiledDragOver(false);
-              const docId = e.dataTransfer.getData('text/plain');
-              if (docId) dropDocOnFolder(docId, null);
+      <div
+        className={`px-1.5 py-1 text-sm cursor-pointer ${
+          folderFilter === 'all' ? 'bg-acc-100 text-primary' : 'hover:bg-black/[0.03]'
+        }`}
+        onClick={() => {
+          setFolderFilter('all');
+          setFoldersOpen(false);
+        }}
+      >
+        All documents
+      </div>
+      <div
+        className={`px-1.5 py-1 text-sm cursor-pointer ${
+          unfiledDragOver
+            ? 'bg-acc-100 outline outline-1 outline-primary'
+            : folderFilter === 'root'
+              ? 'bg-acc-100 text-primary'
+              : 'hover:bg-black/[0.03]'
+        }`}
+        onClick={() => {
+          setFolderFilter('root');
+          setFoldersOpen(false);
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          setUnfiledDragOver(true);
+        }}
+        onDragLeave={() => setUnfiledDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setUnfiledDragOver(false);
+          const docId = e.dataTransfer.getData('text/plain');
+          if (docId) dropDocOnFolder(docId, null);
+        }}
+      >
+        Unfiled
+      </div>
+      <div className="mt-1">
+        {folderTree.map((f) => (
+          <FolderRow
+            key={f.id}
+            folder={f}
+            depth={0}
+            selectedId={folderFilter}
+            onSelect={(id) => {
+              setFolderFilter(id);
+              setFoldersOpen(false);
             }}
-          >
-            Unfiled
-          </div>
-          <div className="mt-1">
-            {folderTree.map((f) => (
-              <FolderRow
-                key={f.id}
-                folder={f}
-                depth={0}
-                selectedId={folderFilter}
-                onSelect={setFolderFilter}
-                onRename={renameFolder}
-                onDelete={deleteFolder}
-                onAddChild={createFolder}
-                onDropDoc={dropDocOnFolder}
-              />
-            ))}
-          </div>
-          {!folders.length && (
-            <p className="text-xs text-muted px-1.5 mt-1">No folders yet — organize documents like a Finder.</p>
-          )}
-        </div>
-
-        <div className="space-y-6 min-w-0">
-      {storageUsage && (
-        <div className="card blueprint p-4">
-          <BlueprintCorners />
-          <div className="flex items-center justify-between text-xs mb-1.5">
-            <span className="card-kicker">Storage used</span>
-            <span className="font-mono text-muted">
-              {formatBytes(storageUsage.usedBytes)} / {formatBytes(storageUsage.limitBytes)}
-            </span>
-          </div>
-          <div className="h-1.5 bg-neutral-200 overflow-hidden">
-            <div
-              className={`h-full ${
-                storageUsage.usedBytes / storageUsage.limitBytes >= 0.9 ? 'bg-danger' : 'bg-primary'
-              }`}
-              style={{ width: `${Math.min(100, (storageUsage.usedBytes / storageUsage.limitBytes) * 100)}%` }}
-            />
-          </div>
-        </div>
+            onRename={renameFolder}
+            onDelete={deleteFolder}
+            onAddChild={createFolder}
+            onDropDoc={dropDocOnFolder}
+          />
+        ))}
+      </div>
+      {!folders.length && (
+        <p className="text-xs text-muted px-1.5 mt-1">No folders yet — organize documents like a Finder.</p>
       )}
-      <div className="card p-4 grid md:grid-cols-3 gap-3">
-        <select className="input" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-          <option value="">All projects</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.title}</option>
-          ))}
-        </select>
-        <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)}>
-          <option value="">All clients</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-        <button type="button" className="btn-secondary" onClick={() => { setClientId(''); setProjectId(''); }}>
-          Clear filters
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-3xl">Shared documents</h1>
+          <p className="text-sm text-muted mt-1">
+            Approved library only. Pending and rejected agent outputs stay on the project page.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn-primary text-sm"
+          onClick={() => {
+            setAddOpen((v) => !v);
+            if (addOpen) setComposing(false);
+          }}
+        >
+          {addOpen ? 'Close' : '+ Add'}
         </button>
       </div>
 
-      <div className="card p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted">Add documents</span>
-          <button
-            type="button"
-            className="text-xs text-primary hover:underline font-medium"
-            onClick={() => setComposing((v) => !v)}
-          >
-            {composing ? 'Cancel new document' : '+ New document'}
-          </button>
-        </div>
-
-        <form onSubmit={upload} className="grid md:grid-cols-4 gap-3">
-          <input className="input" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-          <div className="text-xs text-muted self-center">
-            Upload uses current project/client filters when set
+      {addOpen && (
+        <div className="card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Add documents</span>
+            <button
+              type="button"
+              className="text-xs text-primary hover:underline font-medium"
+              onClick={() => setComposing((v) => !v)}
+            >
+              {composing ? 'Cancel new document' : '+ New document'}
+            </button>
           </div>
-          <button className="btn-primary" type="submit">Upload</button>
-        </form>
-
-        {composing && (
-          <form onSubmit={composeDocument} className="space-y-2 pt-3 border-t border-line">
-            <input
-              className="input"
-              placeholder="Title"
-              value={composeTitle}
-              onChange={(e) => setComposeTitle(e.target.value)}
-              autoFocus
-            />
-            <textarea
-              className="input min-h-[140px] font-mono text-sm"
-              placeholder="Write the document content — markdown supported (headings, **bold**, tables)…"
-              value={composeContent}
-              onChange={(e) => setComposeContent(e.target.value)}
-            />
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted">
-                Saved directly as a document — uses current project/client/folder filters when set
-              </span>
-              <button className="btn-primary" type="submit" disabled={composeSaving}>
-                {composeSaving ? 'Saving…' : 'Create document'}
-              </button>
-            </div>
+          <form onSubmit={upload} className="grid md:grid-cols-4 gap-3">
+            <input className="input" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <div className="text-xs text-muted self-center">Uses current project/client filters when set</div>
+            <button className="btn-primary" type="submit">
+              Upload
+            </button>
           </form>
-        )}
-      </div>
-
-      {documents === null && (
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
+          {composing && (
+            <form onSubmit={composeDocument} className="space-y-2 pt-3 border-t border-line">
+              <input
+                className="input"
+                placeholder="Title"
+                value={composeTitle}
+                onChange={(e) => setComposeTitle(e.target.value)}
+                autoFocus
+              />
+              <textarea
+                className="input min-h-[140px] font-mono text-sm"
+                placeholder="Write the document content — markdown supported…"
+                value={composeContent}
+                onChange={(e) => setComposeContent(e.target.value)}
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted">Uses current project/client/folder filters when set</span>
+                <button className="btn-primary" type="submit" disabled={composeSaving}>
+                  {composeSaving ? 'Saving…' : 'Create document'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       )}
 
-      {documents !== null && (
-      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {documents.map((d) => (
-          <article
-            key={d.id}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData('text/plain', d.id);
-              e.dataTransfer.effectAllowed = 'move';
-            }}
-            className="card blueprint p-4 flex flex-col gap-3 min-w-0 cursor-grab active:cursor-grabbing"
-          >
-            <BlueprintCorners />
-            <div>
-              <div className="flex items-start justify-between gap-2">
-                <h2 className="card-title">{d.title}</h2>
-                <span className={`shrink-0 ${fileKind(d.mime_type).tone}`}>{fileKind(d.mime_type).label}</span>
-              </div>
-              <p className="text-xs text-muted mt-1 truncate">{d.description || d.filename}</p>
-              <p className="text-[11px] text-muted mt-0.5 font-mono">{formatBytes(d.size_bytes)}</p>
+      {/* Mobile folder drawer toggle */}
+      <div className="lg:hidden">
+        <button type="button" className="btn-secondary text-sm w-full" onClick={() => setFoldersOpen((v) => !v)}>
+          {foldersOpen ? 'Hide folders' : 'Folders'}
+        </button>
+        {foldersOpen && <div className="mt-2">{folderPanel}</div>}
+      </div>
+
+      <div className="grid lg:grid-cols-[220px_1fr] gap-4 items-start min-h-[60vh]">
+        <div className="hidden lg:block sticky top-4 self-start max-h-[calc(100vh-6rem)] overflow-y-auto">
+          {folderPanel}
+        </div>
+
+        <div className="min-w-0 flex flex-col gap-3">
+          {/* Toolbar */}
+          <div className="card p-3 flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[160px]">
+              <IconSearch
+                width={14}
+                height={14}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
+              />
+              <input
+                className="input pl-8 text-sm w-full"
+                placeholder="Search title or filename…"
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+              />
             </div>
-            <div className="flex flex-wrap gap-2 text-xs">
-              {d.project_id ? (
-                <Link to={`/projects/${d.project_id}`} className="badge-accent hover:underline">
-                  {d.project_title || 'Project'}
-                </Link>
-              ) : (
-                <span className="badge-neutral">No project</span>
-              )}
-              {d.client_id ? (
-                <Link to={`/clients/${d.client_id}`} className="badge bg-emerald-50 text-success hover:underline">
-                  {d.client_name}
-                </Link>
-              ) : (
-                <span className="badge-neutral">No client</span>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                className="input text-xs"
-                value={d.project_id || ''}
-                onChange={(e) => relink(d.id, { projectId: e.target.value || null })}
-              >
-                <option value="">Link project…</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.title}</option>
-                ))}
-              </select>
-              <select
-                className="input text-xs"
-                value={d.client_id || ''}
-                onChange={(e) => relink(d.id, { clientId: e.target.value || null })}
-              >
-                <option value="">Link client…</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-              <select
-                className="input text-xs col-span-2"
-                value={d.folder_id || ''}
-                onChange={(e) => relink(d.id, { folderId: e.target.value || null })}
-              >
-                <option value="">Unfiled — no folder</option>
-                {flatFolderOptions.map((f) => (
-                  <option key={f.id} value={f.id}>{f.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="mt-auto flex items-center justify-between text-xs text-muted pt-2 border-t border-line">
-              <span>{d.uploader_name || 'System'}</span>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  className="text-primary font-medium hover:underline"
-                  onClick={() => togglePreview(d.id)}
-                >
-                  {expandedIds.has(d.id) ? 'Hide preview' : 'Preview'}
-                </button>
-                <a className="text-primary font-medium hover:underline" href={`/api/documents/${d.id}/download`}>
-                  Download
-                </a>
-              </div>
-            </div>
-            {expandedIds.has(d.id) && (
-              <div className="pt-2 border-t border-line">
-                <DocumentPreview documentId={d.id} />
+            <select className="input text-sm w-auto min-w-[140px]" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <option value="">All projects</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+            <select className="input text-sm w-auto min-w-[140px]" value={clientId} onChange={(e) => setClientId(e.target.value)}>
+              <option value="">All clients</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              onClick={() => {
+                setClientId('');
+                setProjectId('');
+                setSearchQ('');
+              }}
+            >
+              Clear
+            </button>
+            {storageUsage && (
+              <div className="flex items-center gap-2 text-[11px] text-muted ml-auto shrink-0">
+                <span className="font-mono whitespace-nowrap">
+                  {formatBytes(storageUsage.usedBytes)} / {formatBytes(storageUsage.limitBytes)}
+                </span>
+                <div className="w-20 h-1.5 bg-neutral-200 overflow-hidden">
+                  <div
+                    className={`h-full ${
+                      storageUsage.usedBytes / storageUsage.limitBytes >= 0.9 ? 'bg-danger' : 'bg-primary'
+                    }`}
+                    style={{
+                      width: `${Math.min(100, (storageUsage.usedBytes / storageUsage.limitBytes) * 100)}%`,
+                    }}
+                  />
+                </div>
               </div>
             )}
-          </article>
-        ))}
-      </div>
-      )}
-      {documents !== null && !documents.length && (
-        <div className="card p-10 text-center text-sm text-muted">No documents for these filters</div>
-      )}
+          </div>
+
+          {/* Detail strip for selected row */}
+          {selected && (
+            <div className="card px-3 py-2 flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-display font-semibold truncate max-w-[240px]">{selected.title}</span>
+              <span className={fileKind(selected.mime_type).tone}>{fileKind(selected.mime_type).label}</span>
+              {selected.project_id && (
+                <Link to={`/projects/${selected.project_id}`} className="badge-accent hover:underline text-xs">
+                  {selected.project_title || 'Project'}
+                </Link>
+              )}
+              {selected.client_id && (
+                <Link to={`/clients/${selected.client_id}`} className="badge bg-emerald-50 text-success hover:underline text-xs">
+                  {selected.client_name}
+                </Link>
+              )}
+              <select
+                className="input text-xs w-auto py-1"
+                value={selected.folder_id || ''}
+                onChange={(e) => relink(selected.id, { folderId: e.target.value || null })}
+              >
+                <option value="">Unfiled</option>
+                {flatFolderOptions.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-2 ml-auto shrink-0">
+                <button type="button" className="btn-primary text-xs py-1.5" onClick={() => openPreview(selected.id)}>
+                  Open
+                </button>
+                <a className="btn-ghost text-xs py-1.5" href={`/api/documents/${selected.id}/download`}>
+                  Download
+                </a>
+                {isTextish(selected.mime_type) && (
+                  <a className="btn-ghost text-xs py-1.5" href={`/api/documents/${selected.id}/export/docx`} download>
+                    Export
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* File list */}
+          <div
+            ref={listRef}
+            className="card overflow-hidden outline-none"
+            tabIndex={0}
+            onKeyDown={onListKeyDown}
+          >
+            {documents === null && (
+              <div className="p-8 text-sm text-muted animate-pulse">Loading documents…</div>
+            )}
+            {documents !== null && !documents.length && (
+              <div className="p-10 text-center text-sm text-muted">No documents for these filters</div>
+            )}
+            {documents !== null && documents.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted">
+                      <th className="px-3 py-2 font-semibold">Title</th>
+                      <th className="px-3 py-2 font-semibold w-20">Type</th>
+                      <th className="px-3 py-2 font-semibold hidden md:table-cell">Project</th>
+                      <th className="px-3 py-2 font-semibold hidden lg:table-cell">Client</th>
+                      <th className="px-3 py-2 font-semibold w-24 text-right">Size</th>
+                      <th className="px-3 py-2 font-semibold w-28 hidden sm:table-cell">Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {docs.map((d) => {
+                      const kind = fileKind(d.mime_type);
+                      const active = d.id === selectedId;
+                      return (
+                        <tr
+                          key={d.id}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', d.id);
+                            e.dataTransfer.effectAllowed = 'move';
+                          }}
+                          className={`border-b border-line last:border-0 cursor-pointer ${
+                            active ? 'bg-acc-100' : 'hover:bg-black/[0.02]'
+                          }`}
+                          onClick={() => setSelectedId(d.id)}
+                          onDoubleClick={() => openPreview(d.id)}
+                        >
+                          <td className="px-3 py-2.5 min-w-0">
+                            <div className="font-medium truncate max-w-[280px]">{d.title}</div>
+                            {d.filename && (
+                              <div className="text-[11px] text-muted truncate max-w-[280px]">{d.filename}</div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={kind.tone}>{kind.label}</span>
+                          </td>
+                          <td className="px-3 py-2.5 hidden md:table-cell truncate max-w-[140px] text-muted">
+                            {d.project_title || '—'}
+                          </td>
+                          <td className="px-3 py-2.5 hidden lg:table-cell truncate max-w-[120px] text-muted">
+                            {d.client_name || '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono text-xs text-muted whitespace-nowrap">
+                            {formatBytes(d.size_bytes)}
+                          </td>
+                          <td className="px-3 py-2.5 hidden sm:table-cell text-xs text-muted whitespace-nowrap">
+                            {formatDate(d.updated_at || d.created_at)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {previewDoc && (
+        <DocumentPreviewModal
+          document={previewDoc}
+          siblings={docs}
+          onClose={closePreview}
+          onNavigate={navigatePreview}
+        />
+      )}
     </div>
   );
 }
