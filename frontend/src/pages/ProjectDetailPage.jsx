@@ -37,11 +37,9 @@ function ProgressBar({ value, live }) {
         <span className="font-medium text-ink">{live ? 'Live progress' : 'Progress'}</span>
         <span className="font-mono">{pct}%</span>
       </div>
-      <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
+      <div className="h-2 bg-neutral-200 overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all duration-700 ${
-            live ? 'bg-gradient-to-r from-primary via-blue-400 to-primary bg-[length:200%_100%] animate-pulse' : 'bg-primary'
-          }`}
+          className={`h-full transition-all duration-700 ${live ? 'bg-primary animate-pulse' : 'bg-primary'}`}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -96,8 +94,8 @@ function SubAgentCard({ e }) {
   const isRunning = e.status === 'started';
   return (
     <div
-      className={`rounded-lg border px-3 py-2 text-xs ${
-        isErr ? 'border-red-200 bg-red-50' : isOk ? 'border-emerald-200 bg-emerald-50/60' : 'border-line bg-white'
+      className={`border px-3 py-2 text-xs ${
+        isErr ? 'border-danger/40 bg-red-50' : isOk ? 'border-primary/30 bg-acc-100/50' : 'border-line'
       }`}
     >
       <div className="flex items-center gap-1.5 font-semibold">
@@ -343,25 +341,23 @@ export default function ProjectDetailPage() {
             </p>
           )}
           <div className="flex flex-wrap items-center gap-2 mt-3 text-xs">
-            <span
-              className={`badge inline-flex items-center gap-1.5 font-semibold ${headerToneClasses.badge}`}
-            >
+            <span className={`inline-flex items-center gap-1.5 font-semibold ${headerToneClasses.badge}`}>
               {live && <IconLoader width={12} height={12} />}
               Stage: {stageLabel(activeStage)}
             </span>
-            <span className="badge bg-slate-100 capitalize">{project.status}</span>
+            <span className="badge-outline capitalize">{project.status}</span>
             {project.client_name && (
-              <Link to={`/clients/${project.client_id}`} className="badge bg-emerald-50 text-success hover:underline">
+              <Link to={`/clients/${project.client_id}`} className="badge-neutral hover:underline">
                 {project.client_name}
               </Link>
             )}
             {project.overdue && (
-              <span className="badge bg-red-100 text-danger inline-flex items-center gap-1">
+              <span className="badge bg-red-50 text-danger inline-flex items-center gap-1">
                 <IconAlert width={11} height={11} />
                 Past due
               </span>
             )}
-            {cp.mode && <span className="badge bg-slate-50 text-muted">Mode: {cp.mode}</span>}
+            {cp.mode && <span className="badge-neutral">Mode: {cp.mode}</span>}
           </div>
         </div>
         <div className="flex gap-2 flex-wrap items-center">
@@ -381,7 +377,7 @@ export default function ProjectDetailPage() {
       <div className="card p-5 space-y-4">
         <ProgressBar value={project.progressPct ?? project.progress_pct} live={live} />
         <div className="grid sm:grid-cols-4 gap-3 text-sm">
-          <div className="rounded-xl bg-slate-50 p-3">
+          <div className="border border-line p-3">
             <div className="text-xs text-muted">Tokens used</div>
             <div className="font-mono mt-1">
               {project.tokens_used}
@@ -391,7 +387,7 @@ export default function ProjectDetailPage() {
               {project.token_budget != null ? `${project.tokenPct ?? 0}% of budget` : 'No cap — tracked for cost visibility'}
             </div>
           </div>
-          <div className="rounded-xl bg-slate-50 p-3">
+          <div className="border border-line p-3">
             <div className="text-xs text-muted">Time used / budget</div>
             <div className="font-mono mt-1">
               {project.timePct != null ? `${project.timePct}%` : '—'}
@@ -402,13 +398,13 @@ export default function ProjectDetailPage() {
                   : ''}
             </div>
           </div>
-          <div className="rounded-xl bg-slate-50 p-3">
+          <div className="border border-line p-3">
             <div className="text-xs text-muted">Due</div>
             <div className="mt-1 text-sm">
               {project.due_at ? new Date(project.due_at).toLocaleString() : 'No due date'}
             </div>
           </div>
-          <div className="rounded-xl bg-slate-50 p-3">
+          <div className="border border-line p-3">
             <div className="text-xs text-muted">Outputs</div>
             <div className="mt-1 font-semibold">
               {documents.length} shared · {stagedDocuments.length} pending
@@ -418,8 +414,8 @@ export default function ProjectDetailPage() {
       </div>
 
       {project.kickoff_plan && (
-        <div className="card p-5 space-y-2 border border-violet-200 bg-violet-50/40">
-          <h2 className="font-semibold flex items-center gap-2 text-violet-900">
+        <div className="card p-5 space-y-2 border-l-4 border-l-accent2 bg-blue-50/40">
+          <h2 className="font-semibold flex items-center gap-2 text-accent2">
             <IconMessage width={16} height={16} /> Agent's kickoff plan
           </h2>
           <p className="text-xs text-muted">
@@ -463,9 +459,9 @@ export default function ProjectDetailPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <span className="badge bg-slate-100">Iter #{project.agent_iteration ?? cp.cycle ?? 0}</span>
-            {cp.mode && <span className="badge bg-violet-50 text-violet-700">{cp.mode}</span>}
-            {cp.status && <span className="badge bg-slate-100 font-mono">agent: {cp.status}</span>}
+            <span className="badge-neutral">Iter #{project.agent_iteration ?? cp.cycle ?? 0}</span>
+            {cp.mode && <span className="badge-accent2">{cp.mode}</span>}
+            {cp.status && <span className="badge-neutral font-mono">agent: {cp.status}</span>}
           </div>
         </div>
 
@@ -489,36 +485,36 @@ export default function ProjectDetailPage() {
                   <span
                     className={`flex items-center justify-center h-7 w-7 rounded-full border-2 text-[11px] font-semibold shrink-0 ${
                       current
-                        ? 'border-primary bg-blue-50 text-primary'
+                        ? 'border-primary bg-acc-100 text-primary'
                         : done
-                          ? 'border-success bg-emerald-50 text-success'
-                          : 'border-line bg-white text-muted'
+                          ? 'border-neutral-700 bg-neutral-100 text-neutral-800'
+                          : 'border-line text-muted'
                     }`}
                   >
                     {done ? <IconCheck width={13} height={13} /> : current && live ? <IconLoader width={13} height={13} /> : idx + 1}
                   </span>
                   <span
                     className={`text-xs whitespace-nowrap ${
-                      current ? 'text-primary font-semibold' : done ? 'text-success font-medium' : 'text-muted'
+                      current ? 'text-primary font-semibold' : done ? 'text-neutral-800 font-medium' : 'text-muted'
                     } group-hover:underline`}
                   >
                     {s.label}
                   </span>
                 </button>
                 {!last && (
-                  <div className={`flex-1 h-0.5 mx-2 min-w-[1rem] ${done ? 'bg-success' : 'bg-slate-200'}`} />
+                  <div className={`flex-1 h-0.5 mx-2 min-w-[1rem] ${done ? 'bg-neutral-700' : 'bg-neutral-200'}`} />
                 )}
               </div>
             );
           })}
           {(['error', 'blocked', 'done', 'waiting_retry', 'idle', 'queued'].includes(activeStage)) && (
             <div
-              className={`ml-3 rounded-lg px-3 py-1.5 text-xs border shrink-0 font-semibold ${
+              className={`ml-3 px-3 py-1.5 text-xs border shrink-0 font-semibold ${
                 activeStage === 'done'
-                  ? 'border-emerald-200 bg-emerald-50 text-success'
+                  ? 'border-neutral-400 bg-neutral-100 text-neutral-800'
                   : activeStage === 'idle' || activeStage === 'queued'
-                    ? 'border-line bg-slate-50'
-                    : 'border-red-200 bg-red-50 text-danger'
+                    ? 'border-line'
+                    : 'border-danger/40 bg-red-50 text-danger'
               }`}
             >
               {stageLabel(activeStage)}
@@ -541,7 +537,7 @@ export default function ProjectDetailPage() {
           </div>
         )}
 
-        <div className="rounded-xl bg-slate-50 border border-line p-3 text-sm space-y-2">
+        <div className="border border-line p-3 text-sm space-y-2">
           {MEMORY_ROWS.map(({ key, icon: Icon, label }, i) => {
             if (key === 'now') {
               return (
@@ -606,12 +602,12 @@ export default function ProjectDetailPage() {
             {diagnostics.map((d, i) => (
               <div
                 key={i}
-                className={`rounded-lg px-3 py-2 text-xs whitespace-pre-wrap flex items-start gap-2 ${
+                className={`px-3 py-2 text-xs whitespace-pre-wrap flex items-start gap-2 border ${
                   d.level === 'error'
-                    ? 'bg-red-50 text-danger border border-red-100'
+                    ? 'bg-red-50 text-danger border-danger/30'
                     : d.level === 'warn'
-                      ? 'bg-amber-50 text-amber-900 border border-amber-100'
-                      : 'bg-slate-50 text-muted border border-line'
+                      ? 'bg-amber-50 text-amber-900 border-amber-300'
+                      : 'text-muted border-line'
                 }`}
               >
                 {d.level === 'error' && <IconAlert width={13} height={13} className="mt-0.5 shrink-0" />}
@@ -671,7 +667,7 @@ export default function ProjectDetailPage() {
                   <button
                     type="button"
                     onClick={() => toggleCycle(group.id)}
-                    className="w-full flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted bg-slate-50 rounded-lg px-2.5 py-1.5 hover:bg-slate-100"
+                    className="w-full flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted border border-line px-2.5 py-1.5 hover:bg-black/[0.03]"
                   >
                     <span>Cycle {group.cycle} · {group.items.length} event{group.items.length === 1 ? '' : 's'}</span>
                     <span className={`transition-transform ${collapsed ? '' : 'rotate-90'}`}>›</span>
@@ -685,7 +681,7 @@ export default function ProjectDetailPage() {
                       return (
                         <div
                           key={e.id}
-                          className={`rounded-lg border-l-4 border border-line bg-white text-xs pl-2.5 py-2 pr-3 ${tc.borderL}`}
+                          className={`border-l-4 border border-line text-xs pl-2.5 py-2 pr-3 ${tc.borderL}`}
                         >
                           <button
                             type="button"
@@ -699,7 +695,7 @@ export default function ProjectDetailPage() {
                               <span className="font-semibold">{stageLabel(e.stage)}</span>
                               <span className="text-muted">{e.action || e.status}</span>
                               {e.model && <span className="font-mono text-[10px] text-muted">{e.model}</span>}
-                              {e.role && <span className="badge bg-slate-100">{e.role}</span>}
+                              {e.role && <span className="badge-neutral">{e.role}</span>}
                               <span className="text-muted ml-auto">
                                 {new Date(e.created_at).toLocaleString()}
                                 {e.duration_ms != null ? ` · ${e.duration_ms}ms` : ''}
@@ -796,10 +792,10 @@ export default function ProjectDetailPage() {
         </div>
         <div className="grid md:grid-cols-2 gap-3">
           {tasks.map((t) => (
-            <div key={t.id} className="rounded-xl border border-line p-3 bg-slate-50/80">
+            <div key={t.id} className="border border-line p-3">
               <div className="flex justify-between gap-2">
                 <div className="font-medium text-sm">{t.title}</div>
-                <span className="badge bg-white capitalize text-xs">{t.status}</span>
+                <span className="badge-outline text-xs">{t.status}</span>
               </div>
               <div className="text-xs text-muted mt-1">{t.assignee_name || 'Unassigned'}</div>
             </div>
@@ -821,18 +817,18 @@ export default function ProjectDetailPage() {
         <div className="card p-5 flex flex-col min-h-[420px] min-w-0">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold">Agent chat / responses</h2>
-            {live && <span className="badge bg-blue-100 text-primary animate-pulse">live</span>}
+            {live && <span className="badge-accent animate-pulse">live</span>}
           </div>
           <div className="flex-1 space-y-3 overflow-y-auto max-h-[360px] mb-3">
             {messages.map((m) => (
               <div
                 key={m.id}
-                className={`rounded-xl px-3 py-2 text-sm whitespace-pre-wrap ${
+                className={`border px-3 py-2 text-sm whitespace-pre-wrap ${
                   m.role === 'user'
-                    ? 'bg-blue-50 text-ink ml-8'
+                    ? 'border-primary/30 bg-acc-100/50 text-ink ml-8'
                     : m.role === 'error'
-                      ? 'bg-red-50 text-danger'
-                      : 'bg-slate-50 text-ink mr-8'
+                      ? 'border-danger/30 bg-red-50 text-danger'
+                      : 'border-line text-ink mr-8'
                 }`}
               >
                 <div className="text-[10px] uppercase tracking-wide text-muted mb-1">{m.role}</div>
@@ -847,7 +843,7 @@ export default function ProjectDetailPage() {
             )}
           </div>
           <form onSubmit={sendChat} className="flex gap-2 border-t border-line pt-3">
-            <input className="input" placeholder="Ask the agent / add instructions…" value={chatInput}
+            <input className="input" placeholder="Nudge the agent…" value={chatInput}
               onChange={(e) => setChatInput(e.target.value)} />
             <button className="btn-primary shrink-0" type="submit">Send</button>
           </form>
@@ -882,7 +878,7 @@ export default function ProjectDetailPage() {
             )}
             <div className="space-y-2 max-h-[28rem] overflow-y-auto">
               {stagedDocuments.map((d) => (
-                <div key={d.id} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
+                <div key={d.id} className="border border-amber-300 bg-amber-50/50 px-3 py-2">
                   <div className="text-sm font-medium">{d.title}</div>
                   <div className="text-xs text-muted mt-0.5 line-clamp-2">{d.description}</div>
                   <div className="flex flex-wrap gap-2 mt-2">
@@ -924,7 +920,7 @@ export default function ProjectDetailPage() {
             <h2 className="font-semibold mb-3">Approved on this project</h2>
             <div className="space-y-2 max-h-[28rem] overflow-y-auto">
               {documents.map((d) => (
-                <div key={d.id} className="rounded-lg border border-line px-3 py-2 hover:bg-slate-50 text-sm">
+                <div key={d.id} className="border border-line px-3 py-2 hover:bg-black/[0.02] text-sm">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="font-medium truncate">{d.title}</div>
@@ -975,7 +971,7 @@ export default function ProjectDetailPage() {
           <div className="space-y-2 max-h-48 overflow-y-auto">
             {files.map((f) => (
               <a key={f.id} href={`/api/projects/${id}/files/${f.id}/download`}
-                className="flex justify-between gap-3 rounded-lg border border-line px-3 py-2 text-sm hover:bg-slate-50">
+                className="flex justify-between gap-3 border border-line px-3 py-2 text-sm hover:bg-black/[0.02]">
                 <span className="truncate">{f.filename}</span>
                 <span className="text-xs text-muted">{Math.round((f.size_bytes || 0) / 1024)} KB</span>
               </a>
@@ -987,7 +983,7 @@ export default function ProjectDetailPage() {
         <div className="card p-5 min-w-0">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold">Work log</h2>
-            {live && <span className="badge bg-blue-100 text-primary animate-pulse">streaming</span>}
+            {live && <span className="badge-accent animate-pulse">streaming</span>}
           </div>
           <div className="space-y-3 max-h-48 overflow-y-auto">
             {[...logs].reverse().slice(0, 40).map((l) => (

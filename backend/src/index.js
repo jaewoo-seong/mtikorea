@@ -12,7 +12,6 @@ const { rootDir } = require('./lib/storage');
 
 const authRoutes = require('./routes/auth');
 const clientsRoutes = require('./routes/clients');
-const emailsRoutes = require('./routes/emails');
 const projectsRoutes = require('./routes/projects');
 const documentsRoutes = require('./routes/documents');
 const documentFoldersRoutes = require('./routes/documentFolders');
@@ -80,7 +79,6 @@ app.get('/health', async (_req, res) => {
 
 app.use('/auth', authRoutes);
 app.use('/api/clients', clientsRoutes);
-app.use('/api/emails', emailsRoutes);
 app.use('/api/projects', projectsRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/document-folders', documentFoldersRoutes);
@@ -95,7 +93,6 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     user: req.user,
     features: {
       googleOauth: Boolean(process.env.GOOGLE_CLIENT_ID),
-      gmail: Boolean(process.env.GMAIL_REFRESH_TOKEN || process.env.GOOGLE_CLIENT_ID),
       openrouter: Boolean(process.env.OPENROUTER_API_KEY),
     },
   });

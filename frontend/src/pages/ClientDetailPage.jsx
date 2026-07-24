@@ -68,7 +68,7 @@ export default function ClientDetailPage() {
   }
 
   if (!data) return <div className="text-muted text-sm">{error || 'Loading…'}</div>;
-  const { client, edits, documents, projects = [], tasks, emails } = data;
+  const { client, edits, documents, projects = [], tasks } = data;
 
   return (
     <div className="space-y-5">
@@ -222,11 +222,6 @@ export default function ClientDetailPage() {
             ))}
             {!edits.length && <li className="text-muted">No edits yet</li>}
           </ul>
-          {!!emails?.length && (
-            <div className="mt-4 pt-4 border-t border-line text-xs text-muted">
-              {emails.length} linked email(s) on file (email module paused in nav focus)
-            </div>
-          )}
         </div>
       )}
     </div>

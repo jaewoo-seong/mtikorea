@@ -76,10 +76,6 @@ router.get('/:id', async (req, res, next) => {
        FROM projects WHERE client_id = $1 ORDER BY updated_at DESC`,
       [req.params.id]
     );
-    const emails = await query(
-      'SELECT id, subject, from_address, received_at, direction, read FROM emails WHERE client_id = $1 ORDER BY received_at DESC NULLS LAST LIMIT 50',
-      [req.params.id]
-    );
     const tasks = await query(
       `SELECT t.*, d.title AS document_title
        FROM shared_tasks t
@@ -93,7 +89,6 @@ router.get('/:id', async (req, res, next) => {
       notes: notes.rows,
       documents: docs.rows,
       projects: projects.rows,
-      emails: emails.rows,
       tasks: tasks.rows,
     });
   } catch (err) {

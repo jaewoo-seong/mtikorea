@@ -43,9 +43,9 @@ export default function LoginPage({ onLogin }) {
   return (
     <div className="min-h-screen grid place-items-center px-4">
       <div className="card w-full max-w-md p-8">
-        <h1 className="font-display text-3xl font-semibold">MTI CRM</h1>
+        <h1 className="font-display text-3xl font-semibold">MTI AI</h1>
         <p className="text-muted text-sm mt-2 leading-relaxed">
-          Email + client CRM with project agents that keep working after you close the browser.
+          Client CRM with project agents that keep working after you close the browser.
         </p>
 
         <form onSubmit={onSubmit} className="mt-8 space-y-3">

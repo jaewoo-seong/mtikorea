@@ -2,61 +2,108 @@
 @tailwind components;
 @tailwind utilities;
 
+/* "Continuum" design language — see .design-ref/design-tokens-fixed.css for the
+   full reference stylesheet these tokens/classes were ported from. */
 :root {
-  --primary: #2563eb;
-  --accent: #f59e0b;
-  --success: #10b981;
-  --danger: #ef4444;
-  --bg: #f9fafb;
-  --surface: #ffffff;
-  --border: #e5e7eb;
-  --text: #1f2937;
-  --muted: #6b7280;
+  --divider: rgba(29, 31, 32, 0.16);
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(1200px 500px at 10% -10%, rgba(37, 99, 235, 0.08), transparent 60%),
-    radial-gradient(900px 400px at 90% 0%, rgba(245, 158, 11, 0.08), transparent 55%),
-    var(--bg);
-  color: var(--text);
-  font-family: 'DM Sans', system-ui, sans-serif;
+  background: #f2f2f3;
+  color: #1d1f20;
+  font-family: 'Barlow', system-ui, sans-serif;
 }
 
-.email-body img { max-width: 100%; height: auto; }
-.email-body a { color: #2563eb; text-decoration: underline; }
-.email-body blockquote {
-  border-left: 3px solid #e5e7eb;
-  padding-left: 12px;
-  color: #64748b;
-  margin: 12px 0;
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Barlow Condensed", system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.12;
 }
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition;
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 text-sm font-display font-semibold transition border border-transparent;
   }
   .btn-primary {
-    @apply btn bg-primary text-white hover:bg-blue-700 shadow-soft;
+    @apply btn bg-primary text-canvas border-primary hover:bg-acc-600 active:bg-acc-700;
   }
   .btn-secondary {
-    @apply btn bg-white border border-line text-ink hover:bg-slate-50;
+    @apply btn border-line text-ink hover:bg-black/[0.04] active:bg-black/[0.08];
   }
   .btn-ghost {
-    @apply btn text-muted hover:bg-white/80 hover:text-ink;
+    @apply btn text-primary border-transparent px-2 hover:bg-primary/10 active:bg-primary/[0.18];
   }
   .btn-danger {
-    @apply btn bg-danger text-white hover:bg-red-600;
+    @apply btn bg-danger text-canvas border-danger hover:opacity-90;
   }
   .card {
-    @apply rounded-xl border border-line bg-surface shadow-soft;
+    @apply relative border border-line bg-transparent flex flex-col gap-2 p-3;
+  }
+  .card-kicker {
+    @apply text-[10px] tracking-[0.1em] uppercase text-primary;
+  }
+  .card-title {
+    @apply font-display font-semibold text-[17px] leading-tight;
   }
   .input {
-    @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-blue-100;
+    @apply w-full min-h-[36px] border border-line bg-surface px-2.5 py-1.5 text-sm text-ink outline-none placeholder:text-muted focus:border-primary;
   }
   .badge {
-    @apply inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center text-[11px] tracking-wide px-2.5 py-[3px];
   }
+  .badge-accent {
+    @apply badge bg-acc-100 text-acc-800;
+  }
+  .badge-accent2 {
+    @apply badge bg-blue-50 text-accent2;
+  }
+  .badge-neutral {
+    @apply badge bg-neutral-100 text-neutral-800;
+  }
+  .badge-outline {
+    @apply badge border border-primary text-primary;
+  }
+
+  /* Segmented control — exclusive-choice button group sharing one border
+     (time-budget presets, document-type picker, etc). */
+  .seg {
+    @apply inline-flex overflow-hidden border border-line;
+  }
+  .seg-opt {
+    @apply px-3 py-1.5 text-[13px] cursor-pointer border-l border-line first:border-l-0;
+  }
+  .seg-opt-active {
+    @apply bg-primary text-canvas;
+  }
+  .seg-opt:not(.seg-opt-active):hover {
+    @apply bg-black/[0.04];
+  }
+
+  /* Corner registration marks — the signature "blueprint" motif. Apply to a
+     relatively-positioned card/panel that wants the small "+" tick at each
+     corner; use sparingly on primary content, not every element. */
+  .blueprint {
+    @apply relative;
+  }
+  .blueprint > .corner {
+    position: absolute;
+    width: 11px;
+    height: 11px;
+    color: rgba(29, 31, 32, 0.55);
+  }
+  .blueprint > .corner::before,
+  .blueprint > .corner::after {
+    content: '';
+    position: absolute;
+    background: currentColor;
+  }
+  .blueprint > .corner::before { left: 5px; top: 0; width: 1px; height: 100%; }
+  .blueprint > .corner::after { top: 5px; left: 0; width: 100%; height: 1px; }
+  .blueprint > .corner.tl { top: -6px; left: -6px; }
+  .blueprint > .corner.tr { top: -6px; right: -6px; }
+  .blueprint > .corner.bl { bottom: -6px; left: -6px; }
+  .blueprint > .corner.br { bottom: -6px; right: -6px; }
 }

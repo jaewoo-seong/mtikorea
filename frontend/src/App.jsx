@@ -5,7 +5,6 @@ import AppLayout from './components/AppLayout';
 import LoginPage from './pages/LoginPage';
 import ClientsPage from './pages/ClientsPage';
 import ClientDetailPage from './pages/ClientDetailPage';
-import EmailPage from './pages/EmailPage';
 import ProjectsPage from './pages/ProjectsPage';
 import NewProjectPage from './pages/NewProjectPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
@@ -52,8 +51,6 @@ export default function App() {
         <Route index element={<Navigate to="/clients" replace />} />
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/clients/:id" element={<ClientDetailPage />} />
-        <Route path="/email" element={<Navigate to="/email/inbox" replace />} />
-        <Route path="/email/:folder" element={<EmailPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/new" element={<NewProjectPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />

@@ -60,34 +60,6 @@ export const api = {
       request(`/api/clients/${id}/notes`, { method: 'POST', body: JSON.stringify({ body }) }),
   },
 
-  emails: {
-    status: () => request('/api/emails/status'),
-    list: (params = {}) => {
-      const q = new URLSearchParams(params).toString();
-      return request(`/api/emails${q ? `?${q}` : ''}`);
-    },
-    get: (id) => request(`/api/emails/${id}`),
-    sync: (body = {}) =>
-      request('/api/emails/sync', { method: 'POST', body: JSON.stringify(body) }),
-    compose: (body) =>
-      request('/api/emails/compose', { method: 'POST', body: JSON.stringify(body) }),
-    reply: (id, body) =>
-      request(`/api/emails/${id}/reply`, { method: 'POST', body: JSON.stringify(body) }),
-    forward: (id, body) =>
-      request(`/api/emails/${id}/forward`, { method: 'POST', body: JSON.stringify(body) }),
-    action: (id, action) =>
-      request(`/api/emails/${id}/actions`, { method: 'POST', body: JSON.stringify({ action }) }),
-    note: (id, note) =>
-      request(`/api/emails/${id}/notes`, { method: 'POST', body: JSON.stringify({ note }) }),
-    linkClient: (id, clientId) =>
-      request(`/api/emails/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ clientId }),
-      }),
-    organize: (body) =>
-      request('/api/emails/organize', { method: 'POST', body: JSON.stringify(body) }),
-  },
-
   projects: {
     list: () => request('/api/projects'),
     get: (id) => request(`/api/projects/${id}`),

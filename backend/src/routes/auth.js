@@ -56,14 +56,7 @@ router.get('/google', (req, res) => {
     access_type: 'offline',
     prompt: 'consent',
     include_granted_scopes: true,
-    scope: [
-      'openid',
-      'email',
-      'profile',
-      'https://www.googleapis.com/auth/gmail.readonly',
-      'https://www.googleapis.com/auth/gmail.send',
-      'https://www.googleapis.com/auth/gmail.modify',
-    ],
+    scope: ['openid', 'email', 'profile'],
     state,
   });
   res.redirect(url);
@@ -98,24 +91,6 @@ router.get('/google/callback', async (req, res, next) => {
       avatarUrl: data.picture,
       oauthId: data.id,
     });
-    // Always persist tokens for shared mailbox. New refresh_token replaces stale ones (invalid_grant).
-    if (tokens.refresh_token || tokens.access_token) {
-      await query(
-        `INSERT INTO email_accounts (org_id, email, provider, access_token, refresh_token, token_expiry, is_shared)
-         VALUES ($1, $2, 'gmail', $3, $4, to_timestamp($5), true)
-         ON CONFLICT (org_id, email) DO UPDATE SET
-           access_token = COALESCE(EXCLUDED.access_token, email_accounts.access_token),
-           refresh_token = COALESCE(EXCLUDED.refresh_token, email_accounts.refresh_token),
-           token_expiry = COALESCE(EXCLUDED.token_expiry, email_accounts.token_expiry)`,
-        [
-          user.org_id,
-          data.email,
-          tokens.access_token || null,
-          tokens.refresh_token || null,
-          tokens.expiry_date ? tokens.expiry_date / 1000 : null,
-        ]
-      );
-    }
     req.session.userId = user.id;
     req.session.orgId = user.org_id;
     const appUrl = process.env.APP_URL || 'http://localhost:5173';
@@ -127,8 +102,7 @@ router.get('/google/callback', async (req, res, next) => {
         `Google unauthorized_client<br/><br/>` +
           `Usually: redirect URI mismatch, or client ID/secret/refresh token not from the same Web OAuth client.<br/>` +
           `This app callback: <code>${callbackUrl(req)}</code><br/>` +
-          `Add that exact URI in Google Cloud → Credentials → OAuth client → Authorized redirect URIs.<br/>` +
-          `Then clear GMAIL_REFRESH_TOKEN and sign in with Google again to mint a new token.`
+          `Add that exact URI in Google Cloud → Credentials → OAuth client → Authorized redirect URIs.`
       );
     }
     next(err);

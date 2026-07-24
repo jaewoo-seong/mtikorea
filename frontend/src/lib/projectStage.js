@@ -1,10 +1,10 @@
-/** Stage labels for continuous orchestrator pipeline. */
+/** Stage labels for continuous orchestrator pipeline (Continuum wording). */
 export const PIPELINE = [
   { id: 'queued', label: 'Queued' },
   { id: 'planning', label: 'Planning' },
-  { id: 'sub_agents', label: 'Sub-agents' },
-  { id: 'synthesis', label: 'Synthesis' },
-  { id: 'review', label: 'Review' },
+  { id: 'sub_agents', label: 'Researching' },
+  { id: 'synthesis', label: 'Synthesizing' },
+  { id: 'review', label: 'Reviewing' },
   { id: 'saving', label: 'Saving' },
   { id: 'waiting_retry', label: 'Retry wait' },
   { id: 'idle', label: 'Idle' },
@@ -63,12 +63,15 @@ export function stageTone(stage) {
   return 'active';
 }
 
+// Continuum's tag system is deliberately restrained — accent-blue for "active/highlighted"
+// and neutral-gray for "settled/done", no semantic green. Error/warn get their own muted
+// tint since our system has real failure modes the reference design didn't need to model.
 const TONE_CLASSES = {
-  active: { badge: 'bg-blue-100 text-primary', bar: 'bg-primary', dot: 'bg-primary', borderL: 'border-l-primary' },
-  success: { badge: 'bg-emerald-100 text-success', bar: 'bg-success', dot: 'bg-success', borderL: 'border-l-success' },
-  error: { badge: 'bg-red-100 text-danger', bar: 'bg-danger', dot: 'bg-danger', borderL: 'border-l-danger' },
-  warn: { badge: 'bg-amber-100 text-amber-700', bar: 'bg-amber-500', dot: 'bg-amber-500', borderL: 'border-l-amber-500' },
-  idle: { badge: 'bg-slate-100 text-muted', bar: 'bg-slate-400', dot: 'bg-slate-400', borderL: 'border-l-slate-300' },
+  active: { badge: 'badge-accent', bar: 'bg-primary', dot: 'bg-primary', borderL: 'border-l-primary' },
+  success: { badge: 'badge-neutral', bar: 'bg-neutral-700', dot: 'bg-neutral-700', borderL: 'border-l-neutral-700' },
+  error: { badge: 'badge bg-red-50 text-danger', bar: 'bg-danger', dot: 'bg-danger', borderL: 'border-l-danger' },
+  warn: { badge: 'badge bg-amber-50 text-amber-800', bar: 'bg-amber-600', dot: 'bg-amber-600', borderL: 'border-l-amber-600' },
+  idle: { badge: 'badge-outline', bar: 'bg-neutral-400', dot: 'bg-neutral-400', borderL: 'border-l-neutral-300' },
 };
 
 export function toneClasses(tone) {

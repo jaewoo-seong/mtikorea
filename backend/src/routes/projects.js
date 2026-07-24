@@ -23,13 +23,14 @@ function withProgress(row) {
 router.get('/', async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT p.*, c.name AS client_name,
+      `SELECT p.*, c.name AS client_name, u.name AS creator_name,
         (SELECT COUNT(*)::int FROM agent_work_log w WHERE w.project_id = p.id) AS log_count,
         (SELECT COUNT(*)::int FROM project_files f WHERE f.project_id = p.id) AS file_count,
         (SELECT COUNT(*)::int FROM agent_task_results r WHERE r.project_id = p.id) AS result_count,
         (SELECT COUNT(*)::int FROM shared_documents d WHERE d.project_id = p.id) AS document_count
        FROM projects p
        LEFT JOIN clients c ON c.id = p.client_id
+       LEFT JOIN users u ON u.id = p.created_by
        WHERE p.org_id = $1
        ORDER BY p.updated_at DESC`,
       [req.user.org_id]
@@ -43,8 +44,10 @@ router.get('/', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT p.*, c.name AS client_name
-       FROM projects p LEFT JOIN clients c ON c.id = p.client_id
+      `SELECT p.*, c.name AS client_name, u.name AS creator_name
+       FROM projects p
+       LEFT JOIN clients c ON c.id = p.client_id
+       LEFT JOIN users u ON u.id = p.created_by
        WHERE p.id = $1 AND p.org_id = $2`,
       [req.params.id, req.user.org_id]
     );

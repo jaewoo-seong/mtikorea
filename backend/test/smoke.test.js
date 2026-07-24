@@ -28,10 +28,11 @@ describe('MTI CRM scaffold', () => {
       path.join(__dirname, '../../frontend/src/App.jsx'),
       'utf8'
     );
-    for (const route of ['/clients', '/email', '/projects', '/documents', '/tasks', '/admin']) {
+    for (const route of ['/clients', '/projects', '/documents', '/tasks', '/admin']) {
       assert.match(app, new RegExp(route.replace('/', '\\/')));
     }
     assert.equal(app.includes('AssistantHome'), false);
+    assert.equal(app.includes('/email'), false, 'Email feature was removed on purpose');
   });
 
   it('worker claims projects not supabase jobs', () => {
