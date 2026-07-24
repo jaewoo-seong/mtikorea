@@ -75,25 +75,23 @@ export default function ClientDetailPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <Link to="/clients" className="text-sm text-muted hover:text-primary">← Client database</Link>
-          <h1 className="font-display text-3xl font-semibold mt-2">{client.name}</h1>
+          <h1 className="text-3xl mt-2">{client.name}</h1>
           <div className="flex flex-wrap gap-2 mt-2 text-xs">
-            <span className="badge bg-slate-100 capitalize">{client.status}</span>
-            {client.industry && <span className="badge bg-blue-50 text-primary">{client.industry}</span>}
-            {client.email && <span className="badge bg-slate-100">{client.email}</span>}
+            <span className="badge-neutral capitalize">{client.status}</span>
+            {client.industry && <span className="badge-accent">{client.industry}</span>}
+            {client.email && <span className="badge-neutral">{client.email}</span>}
           </div>
         </div>
         {msg && <span className="text-xs text-success">{msg}</span>}
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-line pb-2">
+      <div className="seg flex-wrap">
         {TABS.map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
-            className={`px-3 py-1.5 rounded-lg text-sm capitalize ${
-              tab === t ? 'bg-blue-50 text-primary font-semibold' : 'text-muted hover:bg-slate-50'
-            }`}
+            className={`seg-opt capitalize ${tab === t ? 'seg-opt-active' : ''}`}
           >
             {t}
           </button>
@@ -132,9 +130,9 @@ export default function ClientDetailPage() {
             <div className="card p-4">
               <div className="text-xs text-muted">Linked</div>
               <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="rounded-lg bg-slate-50 py-3"><div className="text-lg font-semibold">{documents.length}</div>docs</div>
-                <div className="rounded-lg bg-slate-50 py-3"><div className="text-lg font-semibold">{projects.length}</div>projects</div>
-                <div className="rounded-lg bg-slate-50 py-3"><div className="text-lg font-semibold">{tasks.length}</div>tasks</div>
+                <div className="border border-line bg-surface py-3"><div className="text-lg font-semibold">{documents.length}</div>docs</div>
+                <div className="border border-line bg-surface py-3"><div className="text-lg font-semibold">{projects.length}</div>projects</div>
+                <div className="border border-line bg-surface py-3"><div className="text-lg font-semibold">{tasks.length}</div>tasks</div>
               </div>
             </div>
             <div className="card p-4 text-sm space-y-2">
@@ -185,7 +183,7 @@ export default function ClientDetailPage() {
             <Link key={p.id} to={`/projects/${p.id}`} className="card p-4 hover:shadow-mid border border-line block">
               <div className="flex justify-between gap-2">
                 <div className="font-semibold">{p.title}</div>
-                <span className="badge capitalize bg-slate-100">{p.status}</span>
+                <span className="badge-neutral capitalize">{p.status}</span>
               </div>
               <div className="text-xs text-muted mt-2">{Math.round(p.progress_pct || 0)}% progress</div>
             </Link>

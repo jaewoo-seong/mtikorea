@@ -100,7 +100,7 @@ export default function NewProjectPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="font-display text-3xl font-semibold">New project</h1>
+        <h1 className="text-3xl">New project</h1>
         <p className="text-sm text-muted mt-1">
           Set a title, a goal, and a time budget. This creates a draft you can review — the main
           agent only plans its agenda and sub-agent allocation, and starts working, once you click
@@ -211,7 +211,7 @@ export default function NewProjectPage() {
               {contextFiles.map((f, i) => (
                 <li
                   key={`${f.name}-${i}`}
-                  className="flex items-center justify-between text-xs bg-slate-50 border border-line rounded px-2 py-1"
+                  className="flex items-center justify-between text-xs bg-surface border border-line px-2 py-1"
                 >
                   <span className="truncate">{f.name}</span>
                   <button
@@ -249,23 +249,19 @@ export default function NewProjectPage() {
             <span>5 min</span>
             <span>12 hours</span>
           </div>
-          <div className="flex flex-wrap gap-2 pt-1">
+          <div className="seg flex-wrap">
             {PRESETS.map((p) => (
               <button
                 key={p.minutes}
                 type="button"
-                className={`rounded-full px-3 py-1 text-xs border transition ${
-                  timeBudgetMinutes === p.minutes
-                    ? 'border-primary bg-blue-50 text-primary'
-                    : 'border-line bg-white text-muted hover:bg-slate-50'
-                }`}
+                className={`seg-opt ${timeBudgetMinutes === p.minutes ? 'seg-opt-active' : ''}`}
                 onClick={() => setTimeBudgetMinutes(p.minutes)}
               >
                 {p.label}
               </button>
             ))}
           </div>
-          <div className="rounded-lg bg-slate-50 border border-line px-3 py-2 text-xs text-muted flex items-start gap-2">
+          <div className="border border-line bg-surface px-3 py-2 text-xs text-muted flex items-start gap-2">
             <IconAlert width={13} height={13} className="mt-0.5 shrink-0" />
             When time runs out, the main agent wraps up with a final summary instead of stopping
             mid-thought. There's no cap on tokens or how many other projects can run at the same

@@ -22,7 +22,7 @@ function KeyStatusBadge({ status }) {
       </span>
     );
   }
-  return <span className="badge bg-slate-100 text-muted">Untested</span>;
+  return <span className="badge-neutral">Untested</span>;
 }
 
 export default function AdminPage({ user }) {
@@ -125,7 +125,7 @@ export default function AdminPage({ user }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl font-semibold">Admin</h1>
+        <h1 className="text-3xl">Admin</h1>
         <p className="text-sm text-muted mt-1">Create and manage local staff accounts</p>
       </div>
 
@@ -143,14 +143,14 @@ export default function AdminPage({ user }) {
 
       {msg && <p className="text-sm text-muted">{msg}</p>}
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-hidden p-0 gap-0">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-muted text-left">
+          <thead className="bg-surface text-muted text-left">
             <tr>
-              <th className="px-4 py-3">User</th>
-              <th className="px-4 py-3">Role</th>
-              <th className="px-4 py-3">Active</th>
-              <th className="px-4 py-3">Password</th>
+              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">User</th>
+              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Role</th>
+              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Active</th>
+              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Password</th>
             </tr>
           </thead>
           <tbody>
@@ -164,9 +164,7 @@ export default function AdminPage({ user }) {
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <span className="inline-block rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-muted">
-                    {u.role}
-                  </span>
+                  <span className="badge-neutral capitalize">{u.role}</span>
                 </td>
                 <td className="px-4 py-3">
                   <button
@@ -212,7 +210,7 @@ export default function AdminPage({ user }) {
       </div>
 
       <div>
-        <h2 className="font-display text-2xl font-semibold">Model & API keys</h2>
+        <h2 className="text-2xl">Model & API keys</h2>
         <p className="text-sm text-muted mt-1">
           <strong>Default:</strong> Railway/env <code className="text-xs">OPENROUTER_API_KEY</code> runs
           the main Haiku orchestrator (and env free-model fallback for subs).
@@ -242,15 +240,15 @@ export default function AdminPage({ user }) {
         </button>
       </form>
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-hidden p-0 gap-0">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-muted text-left">
+          <thead className="bg-surface text-muted text-left">
             <tr>
-              <th className="px-4 py-3">Label</th>
-              <th className="px-4 py-3">Provider</th>
-              <th className="px-4 py-3">Models</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Actions</th>
+              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Label</th>
+              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Provider</th>
+              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Models</th>
+              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Status</th>
+              <th className="px-4 py-3 text-[11px] uppercase tracking-wide">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -264,7 +262,7 @@ export default function AdminPage({ user }) {
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1 max-w-xs">
                     {(k.models || []).map((m) => (
-                      <span key={m} className="badge bg-slate-100 text-[11px] font-mono">{m}</span>
+                      <span key={m} className="badge-neutral text-[11px] font-mono">{m}</span>
                     ))}
                     {!k.models?.length && <span className="text-xs text-muted">No models set</span>}
                   </div>
@@ -290,14 +288,14 @@ export default function AdminPage({ user }) {
                     </button>
                     <button
                       type="button"
-                      className={`text-xs py-1 px-2 rounded ${k.active ? 'btn-secondary' : 'btn-primary'}`}
+                      className={`text-xs py-1 ${k.active ? 'btn-secondary' : 'btn-primary'}`}
                       onClick={() => toggleLlmKeyActive(k)}
                     >
                       {k.active ? 'Disable' : 'Enable'}
                     </button>
                     <ConfirmButton
                       onConfirm={() => deleteLlmKey(k.id, k.label)}
-                      className="text-xs text-muted hover:text-danger px-1.5 py-0.5 rounded"
+                      className="text-xs text-muted hover:text-danger px-1.5 py-0.5"
                     >
                       Delete
                     </ConfirmButton>

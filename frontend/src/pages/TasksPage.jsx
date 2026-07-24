@@ -11,10 +11,10 @@ import {
 import { useToast } from '../components/Toast';
 
 function statusStyle(status) {
-  if (status === 'done') return 'bg-emerald-100 text-success';
-  if (status === 'in_progress') return 'bg-blue-100 text-primary';
-  if (status === 'cancelled') return 'bg-slate-100 text-muted';
-  return 'bg-amber-50 text-amber-800';
+  if (status === 'done') return 'badge bg-emerald-100 text-success';
+  if (status === 'in_progress') return 'badge-accent';
+  if (status === 'cancelled') return 'badge-neutral';
+  return 'badge-outline';
 }
 
 const COLUMNS = [
@@ -289,22 +289,22 @@ export default function TasksPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-3xl font-semibold">Tasks</h1>
+          <h1 className="text-3xl">Tasks</h1>
           <p className="text-sm text-muted mt-1">
             Internal feedback loops — assign a teammate, attach a shared document, request review.
           </p>
         </div>
-        <div className="inline-flex rounded-lg border border-line overflow-hidden shrink-0">
+        <div className="seg shrink-0">
           <button
             type="button"
-            className={`px-3 py-1.5 text-sm ${view === 'board' ? 'bg-primary text-white' : 'bg-surface text-muted hover:text-ink'}`}
+            className={`seg-opt ${view === 'board' ? 'seg-opt-active' : ''}`}
             onClick={() => setView('board')}
           >
             Board
           </button>
           <button
             type="button"
-            className={`px-3 py-1.5 text-sm ${view === 'list' ? 'bg-primary text-white' : 'bg-surface text-muted hover:text-ink'}`}
+            className={`seg-opt ${view === 'list' ? 'seg-opt-active' : ''}`}
             onClick={() => setView('list')}
           >
             List
@@ -373,27 +373,27 @@ export default function TasksPage() {
               <div key={col.key} className="space-y-3">
                 <div className="flex items-center justify-between px-1">
                   <h2 className="font-semibold text-sm">{col.label}</h2>
-                  <span className="badge bg-slate-100 text-muted">{colTasks.length}</span>
+                  <span className="badge-neutral">{colTasks.length}</span>
                 </div>
                 <div className="space-y-3 min-h-[80px]">
                   {colTasks.map((t) => (
                     <article
                       key={t.id}
-                      className="card p-3 border border-line flex flex-col gap-2 cursor-pointer hover:border-primary/50 transition-colors min-w-0"
+                      className="card p-3 flex flex-col gap-2 cursor-pointer hover:border-primary transition-colors min-w-0"
                       onClick={() => openTask(t)}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <h3 className="font-medium text-sm leading-snug">{t.title}</h3>
+                        <h3 className="card-title text-[15px]">{t.title}</h3>
                       </div>
                       <div className="flex flex-wrap gap-1.5 text-[11px]">
                         {t.feedback_requested && (
-                          <span className="badge bg-violet-50 text-violet-700 inline-flex items-center gap-1">
+                          <span className="badge-outline inline-flex items-center gap-1">
                             <IconMessage width={10} height={10} /> Feedback
                           </span>
                         )}
-                        {t.assignee_name && <span className="badge bg-slate-100">→ {t.assignee_name}</span>}
+                        {t.assignee_name && <span className="badge-neutral">→ {t.assignee_name}</span>}
                         {t.due_at && (
-                          <span className="badge bg-slate-100 inline-flex items-center gap-1">
+                          <span className="badge-neutral inline-flex items-center gap-1">
                             <IconClock width={10} height={10} /> {formatDue(t.due_at)}
                           </span>
                         )}
@@ -412,7 +412,7 @@ export default function TasksPage() {
                     </article>
                   ))}
                   {!colTasks.length && (
-                    <div className="text-xs text-muted text-center py-4 border border-dashed border-line rounded-lg">
+                    <div className="text-xs text-muted text-center py-4 border border-dashed border-line">
                       No tasks
                     </div>
                   )}
@@ -426,30 +426,30 @@ export default function TasksPage() {
           {tasks.map((t) => (
             <article
               key={t.id}
-              className="card p-5 border border-line flex flex-col gap-3 cursor-pointer hover:border-primary/50 transition-colors min-w-0"
+              className="card p-4 flex flex-col gap-3 cursor-pointer hover:border-primary transition-colors min-w-0"
               onClick={() => openTask(t)}
             >
               <div className="flex items-start justify-between gap-2">
-                <h2 className="font-semibold leading-snug">{t.title}</h2>
-                <span className={`badge capitalize shrink-0 ${statusStyle(t.status)}`}>{t.status.replace('_', ' ')}</span>
+                <h2 className="card-title">{t.title}</h2>
+                <span className={`capitalize shrink-0 ${statusStyle(t.status)}`}>{t.status.replace('_', ' ')}</span>
               </div>
               <p className="text-sm text-muted line-clamp-3">{t.description || 'No description'}</p>
               <div className="flex flex-wrap gap-2 text-xs">
-                {t.feedback_requested && <span className="badge bg-violet-50 text-violet-700">Feedback</span>}
-                {t.assignee_name && <span className="badge bg-slate-100">→ {t.assignee_name}</span>}
+                {t.feedback_requested && <span className="badge-outline">Feedback</span>}
+                {t.assignee_name && <span className="badge-neutral">→ {t.assignee_name}</span>}
                 {t.document_title && (
                   <a
-                    className="badge bg-blue-50 text-primary hover:underline"
+                    className="badge-accent hover:underline"
                     href={`/api/documents/${t.document_id}/download`}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    📎 {t.document_title}
+                    {t.document_title}
                   </a>
                 )}
                 {t.project_id && (
                   <Link
                     to={`/projects/${t.project_id}`}
-                    className="badge bg-blue-50 text-primary hover:underline"
+                    className="badge-accent hover:underline"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {t.project_title || 'Project'}
@@ -488,11 +488,11 @@ export default function TasksPage() {
       {selectedTask && (
         <div className="fixed inset-0 z-40 flex justify-end">
           <div className="absolute inset-0 bg-ink/30" onClick={closeDrawer} />
-          <div className="relative w-full max-w-md bg-surface h-full shadow-xl border-l border-line flex flex-col">
+          <div className="relative w-full max-w-md bg-canvas h-full border-l border-line flex flex-col">
             <div className="flex items-start justify-between gap-3 p-5 border-b border-line">
               <div>
-                <h2 className="font-semibold text-lg leading-snug">{selectedTask.title}</h2>
-                <span className={`badge capitalize mt-2 inline-block ${statusStyle(selectedTask.status)}`}>
+                <h2 className="font-display text-xl font-semibold leading-snug">{selectedTask.title}</h2>
+                <span className={`capitalize mt-2 inline-block ${statusStyle(selectedTask.status)}`}>
                   {selectedTask.status.replace('_', ' ')}
                 </span>
               </div>
@@ -508,28 +508,28 @@ export default function TasksPage() {
 
               <div className="flex flex-wrap gap-1.5 text-xs">
                 {selectedTask.feedback_requested && (
-                  <span className="badge bg-violet-50 text-violet-700 inline-flex items-center gap-1">
+                  <span className="badge-outline inline-flex items-center gap-1">
                     <IconMessage width={10} height={10} /> Feedback requested
                   </span>
                 )}
                 {selectedTask.assignee_name && (
-                  <span className="badge bg-slate-100">→ {selectedTask.assignee_name}</span>
+                  <span className="badge-neutral">→ {selectedTask.assignee_name}</span>
                 )}
                 {selectedTask.due_at && (
-                  <span className="badge bg-slate-100 inline-flex items-center gap-1">
+                  <span className="badge-neutral inline-flex items-center gap-1">
                     <IconClock width={10} height={10} /> Due {formatDue(selectedTask.due_at)}
                   </span>
                 )}
                 {selectedTask.document_title && (
                   <a
-                    className="badge bg-blue-50 text-primary hover:underline inline-flex items-center gap-1"
+                    className="badge-accent hover:underline inline-flex items-center gap-1"
                     href={`/api/documents/${selectedTask.document_id}/download`}
                   >
                     <IconFile width={10} height={10} /> {selectedTask.document_title}
                   </a>
                 )}
                 {selectedTask.project_id && (
-                  <Link to={`/projects/${selectedTask.project_id}`} className="badge bg-blue-50 text-primary hover:underline">
+                  <Link to={`/projects/${selectedTask.project_id}`} className="badge-accent hover:underline">
                     {selectedTask.project_title || 'Project'}
                   </Link>
                 )}
@@ -552,8 +552,8 @@ export default function TasksPage() {
               </select>
 
               {canReview && (
-                <div className="card p-3 bg-amber-50/60 border border-amber-200 space-y-2">
-                  <p className="text-xs font-medium text-amber-900">This task is awaiting review.</p>
+                <div className="card p-3 border-primary space-y-2">
+                  <p className="text-xs font-medium text-ink">This task is awaiting review.</p>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -597,8 +597,8 @@ export default function TasksPage() {
                   {comments.map((c) => (
                     <div
                       key={c.id}
-                      className={`rounded-xl px-3 py-2 text-sm whitespace-pre-wrap ${
-                        c.author_id === me?.id ? 'bg-blue-50 text-ink ml-8' : 'bg-slate-50 text-ink mr-8'
+                      className={`border border-line px-3 py-2 text-sm whitespace-pre-wrap ${
+                        c.author_id === me?.id ? 'bg-acc-100 text-ink ml-8' : 'bg-surface text-ink mr-8'
                       }`}
                     >
                       <div className="text-[10px] uppercase tracking-wide text-muted mb-1">
@@ -621,12 +621,12 @@ export default function TasksPage() {
 
             <form onSubmit={sendComment} className="relative flex gap-2 border-t border-line p-4 shrink-0">
               {mentionSuggestions.length > 0 && (
-                <div className="absolute bottom-full left-4 right-4 mb-1 card border border-line shadow-mid overflow-hidden">
+                <div className="absolute bottom-full left-4 right-4 mb-1 card border border-line overflow-hidden p-0 gap-0">
                   {mentionSuggestions.map((u) => (
                     <button
                       type="button"
                       key={u.id}
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center justify-between"
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-black/[0.03] flex items-center justify-between"
                       onClick={() => pickMention(u)}
                     >
                       <span>{u.name || u.email}</span>

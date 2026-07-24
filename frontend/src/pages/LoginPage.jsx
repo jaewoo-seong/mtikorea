@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import BlueprintCorners from '../components/BlueprintCorners';
 
 export default function LoginPage({ onLogin }) {
   const [error, setError] = useState('');
@@ -41,10 +42,12 @@ export default function LoginPage({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen grid place-items-center px-4">
-      <div className="card w-full max-w-md p-8">
-        <h1 className="font-display text-3xl font-semibold">MTI AI</h1>
-        <p className="text-muted text-sm mt-2 leading-relaxed">
+    <div className="min-h-screen grid place-items-center px-4 bg-canvas">
+      <div className="card blueprint w-full max-w-md p-8 gap-0">
+        <BlueprintCorners />
+        <p className="card-kicker">Workspace</p>
+        <h1 className="text-4xl mt-2">MTI AI</h1>
+        <p className="text-muted text-sm mt-3 leading-relaxed">
           Client CRM with project agents that keep working after you close the browser.
         </p>
 

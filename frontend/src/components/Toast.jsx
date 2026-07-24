@@ -41,13 +41,13 @@ export function ToastProvider({ children }) {
               ? 'border-emerald-200 bg-emerald-50 text-success'
               : t.type === 'error'
                 ? 'border-red-200 bg-red-50 text-danger'
-                : 'border-line bg-white text-ink';
+                : 'border-line bg-canvas text-ink';
           const Icon = t.type === 'error' ? IconAlert : IconCheck;
           return (
             <div
               key={t.id}
               role="status"
-              className={`flex items-start gap-2 rounded-xl border px-4 py-3 shadow-mid text-sm ${tone}`}
+              className={`flex items-start gap-2 border px-4 py-3 text-sm ${tone}`}
             >
               {t.type !== 'info' && <Icon width={16} height={16} className="mt-0.5 shrink-0" />}
               <span className="flex-1 whitespace-pre-wrap break-words">{t.message}</span>

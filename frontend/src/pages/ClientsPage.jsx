@@ -42,7 +42,7 @@ export default function ClientsPage() {
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-3xl font-semibold">Client database</h1>
+          <h1 className="text-3xl">Client database</h1>
           <p className="text-sm text-muted mt-1">
             Full company table. Click a row for profile, markdown, documents, and linked projects.
           </p>
@@ -80,26 +80,26 @@ export default function ClientsPage() {
 
       {error && <p className="text-danger text-sm">{error}</p>}
 
-      <div className="card overflow-hidden border border-line">
+      <div className="card overflow-hidden p-0 gap-0">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[900px]">
-            <thead className="bg-slate-50 text-muted text-left">
+            <thead className="bg-surface text-muted text-left">
               <tr>
-                <th className="px-4 py-3 font-medium">Company</th>
-                <th className="px-4 py-3 font-medium">Korean name</th>
-                <th className="px-4 py-3 font-medium">Industry</th>
-                <th className="px-4 py-3 font-medium">Email</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Docs</th>
-                <th className="px-4 py-3 font-medium">Projects</th>
-                <th className="px-4 py-3 font-medium">Tasks</th>
+                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Company</th>
+                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Korean name</th>
+                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Industry</th>
+                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Email</th>
+                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Status</th>
+                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Docs</th>
+                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Projects</th>
+                <th className="px-4 py-3 font-medium text-[11px] uppercase tracking-wide">Tasks</th>
               </tr>
             </thead>
             <tbody>
               {clients.map((c) => (
                 <tr
                   key={c.id}
-                  className="border-t border-line hover:bg-blue-50/60 cursor-pointer"
+                  className="border-t border-line hover:bg-acc-100/60 cursor-pointer"
                   onClick={() => navigate(`/clients/${c.id}`)}
                 >
                   <td className="px-4 py-3 font-semibold text-primary">{c.name}</td>
@@ -107,7 +107,7 @@ export default function ClientsPage() {
                   <td className="px-4 py-3 text-muted">{c.industry || '—'}</td>
                   <td className="px-4 py-3 text-muted">{c.email || '—'}</td>
                   <td className="px-4 py-3">
-                    <span className="badge bg-slate-100 capitalize">{c.status}</span>
+                    <span className="badge-neutral capitalize">{c.status}</span>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs">{c.document_count ?? 0}</td>
                   <td className="px-4 py-3 font-mono text-xs">{c.project_count ?? 0}</td>

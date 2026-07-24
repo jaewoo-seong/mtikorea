@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import DocumentPreview from '../components/DocumentPreview';
 import ConfirmButton from '../components/ConfirmButton';
+import BlueprintCorners from '../components/BlueprintCorners';
 import { useToast } from '../components/Toast';
 
 function buildFolderTree(folders) {
@@ -38,12 +39,12 @@ function FolderRow({ folder, depth, selectedId, onSelect, onRename, onDelete, on
   return (
     <div>
       <div
-        className={`group flex items-center gap-1 rounded px-1.5 py-1 text-sm cursor-pointer ${
+        className={`group flex items-center gap-1 px-1.5 py-1 text-sm cursor-pointer ${
           dragOver
-            ? 'bg-blue-100 ring-2 ring-primary'
+            ? 'bg-acc-100 outline outline-1 outline-primary'
             : selectedId === folder.id
-              ? 'bg-blue-50 text-primary'
-              : 'hover:bg-slate-50'
+              ? 'bg-acc-100 text-primary'
+              : 'hover:bg-black/[0.03]'
         }`}
         style={{ paddingLeft: `${depth * 14 + 6}px` }}
         onClick={() => !editing && onSelect(folder.id)}
@@ -136,31 +137,31 @@ function formatBytes(bytes) {
 }
 
 function fileKind(mimeType) {
-  if (!mimeType) return { label: 'File', tone: 'bg-slate-100 text-muted' };
-  if (mimeType.startsWith('image/')) return { label: 'Image', tone: 'bg-violet-50 text-violet-700' };
-  if (mimeType === 'application/pdf') return { label: 'PDF', tone: 'bg-red-50 text-danger' };
+  if (!mimeType) return { label: 'File', tone: 'badge-neutral' };
+  if (mimeType.startsWith('image/')) return { label: 'Image', tone: 'badge-accent2' };
+  if (mimeType === 'application/pdf') return { label: 'PDF', tone: 'badge bg-red-50 text-danger' };
   if (mimeType.startsWith('text/') || mimeType === 'application/json') {
-    return { label: 'Text', tone: 'bg-emerald-50 text-success' };
+    return { label: 'Text', tone: 'badge bg-emerald-50 text-success' };
   }
   if (mimeType.includes('word') || mimeType.includes('document')) {
-    return { label: 'Doc', tone: 'bg-blue-50 text-primary' };
+    return { label: 'Doc', tone: 'badge-accent' };
   }
   if (mimeType.includes('sheet') || mimeType.includes('excel')) {
-    return { label: 'Sheet', tone: 'bg-teal-50 text-teal-700' };
+    return { label: 'Sheet', tone: 'badge-outline' };
   }
-  return { label: 'File', tone: 'bg-slate-100 text-muted' };
+  return { label: 'File', tone: 'badge-neutral' };
 }
 
 function SkeletonCard() {
   return (
-    <div className="card p-5 animate-pulse space-y-3">
-      <div className="h-4 w-2/3 bg-slate-100 rounded" />
-      <div className="h-3 w-1/2 bg-slate-100 rounded" />
+    <div className="card p-4 animate-pulse space-y-3">
+      <div className="h-4 w-2/3 bg-neutral-200" />
+      <div className="h-3 w-1/2 bg-neutral-200" />
       <div className="flex gap-2">
-        <div className="h-5 w-16 bg-slate-100 rounded-full" />
-        <div className="h-5 w-16 bg-slate-100 rounded-full" />
+        <div className="h-5 w-16 bg-neutral-200" />
+        <div className="h-5 w-16 bg-neutral-200" />
       </div>
-      <div className="h-8 bg-slate-100 rounded" />
+      <div className="h-8 bg-neutral-200" />
     </div>
   );
 }
@@ -340,7 +341,7 @@ export default function DocumentsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl font-semibold">Shared documents</h1>
+        <h1 className="text-3xl">Shared documents</h1>
         <p className="text-sm text-muted mt-1">
           Approved library only. Agent outputs stay hidden in project staging until someone clicks Approve.
           Title = document ID for references. Link to client / project either way.
@@ -348,31 +349,32 @@ export default function DocumentsPage() {
       </div>
 
       <div className="grid lg:grid-cols-[240px_1fr] gap-5 items-start">
-        <div className="card p-3 min-w-0">
+        <div className="card blueprint p-3 min-w-0">
+          <BlueprintCorners />
           <div className="flex items-center justify-between px-1.5 mb-1">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Folders</span>
+            <span className="card-kicker">Folders</span>
             <button
               type="button"
               title="New folder"
-              className="text-muted hover:text-primary text-sm px-1"
+              className="btn-ghost text-xs px-1"
               onClick={() => createFolder(folderFilter !== 'all' && folderFilter !== 'root' ? folderFilter : null)}
             >
               + New
             </button>
           </div>
           <div
-            className={`rounded px-1.5 py-1 text-sm cursor-pointer ${folderFilter === 'all' ? 'bg-blue-50 text-primary' : 'hover:bg-slate-50'}`}
+            className={`px-1.5 py-1 text-sm cursor-pointer ${folderFilter === 'all' ? 'bg-acc-100 text-primary' : 'hover:bg-black/[0.03]'}`}
             onClick={() => setFolderFilter('all')}
           >
             All documents
           </div>
           <div
-            className={`rounded px-1.5 py-1 text-sm cursor-pointer ${
+            className={`px-1.5 py-1 text-sm cursor-pointer ${
               unfiledDragOver
-                ? 'bg-blue-100 ring-2 ring-primary'
+                ? 'bg-acc-100 outline outline-1 outline-primary'
                 : folderFilter === 'root'
-                  ? 'bg-blue-50 text-primary'
-                  : 'hover:bg-slate-50'
+                  ? 'bg-acc-100 text-primary'
+                  : 'hover:bg-black/[0.03]'
             }`}
             onClick={() => setFolderFilter('root')}
             onDragOver={(e) => e.preventDefault()}
@@ -409,16 +411,17 @@ export default function DocumentsPage() {
 
         <div className="space-y-6 min-w-0">
       {storageUsage && (
-        <div className="card p-4">
+        <div className="card blueprint p-4">
+          <BlueprintCorners />
           <div className="flex items-center justify-between text-xs mb-1.5">
-            <span className="font-semibold text-muted">Storage used</span>
+            <span className="card-kicker">Storage used</span>
             <span className="font-mono text-muted">
               {formatBytes(storageUsage.usedBytes)} / {formatBytes(storageUsage.limitBytes)}
             </span>
           </div>
-          <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+          <div className="h-1.5 bg-neutral-200 overflow-hidden">
             <div
-              className={`h-full rounded-full ${
+              className={`h-full ${
                 storageUsage.usedBytes / storageUsage.limitBytes >= 0.9 ? 'bg-danger' : 'bg-primary'
               }`}
               style={{ width: `${Math.min(100, (storageUsage.usedBytes / storageUsage.limitBytes) * 100)}%` }}
@@ -510,30 +513,31 @@ export default function DocumentsPage() {
               e.dataTransfer.setData('text/plain', d.id);
               e.dataTransfer.effectAllowed = 'move';
             }}
-            className="card p-5 flex flex-col gap-3 border border-line min-w-0 cursor-grab active:cursor-grabbing"
+            className="card blueprint p-4 flex flex-col gap-3 min-w-0 cursor-grab active:cursor-grabbing"
           >
+            <BlueprintCorners />
             <div>
               <div className="flex items-start justify-between gap-2">
-                <h2 className="font-semibold text-base leading-snug">{d.title}</h2>
-                <span className={`badge shrink-0 ${fileKind(d.mime_type).tone}`}>{fileKind(d.mime_type).label}</span>
+                <h2 className="card-title">{d.title}</h2>
+                <span className={`shrink-0 ${fileKind(d.mime_type).tone}`}>{fileKind(d.mime_type).label}</span>
               </div>
               <p className="text-xs text-muted mt-1 truncate">{d.description || d.filename}</p>
               <p className="text-[11px] text-muted mt-0.5 font-mono">{formatBytes(d.size_bytes)}</p>
             </div>
             <div className="flex flex-wrap gap-2 text-xs">
               {d.project_id ? (
-                <Link to={`/projects/${d.project_id}`} className="badge bg-blue-50 text-primary hover:underline">
+                <Link to={`/projects/${d.project_id}`} className="badge-accent hover:underline">
                   {d.project_title || 'Project'}
                 </Link>
               ) : (
-                <span className="badge bg-slate-100 text-muted">No project</span>
+                <span className="badge-neutral">No project</span>
               )}
               {d.client_id ? (
                 <Link to={`/clients/${d.client_id}`} className="badge bg-emerald-50 text-success hover:underline">
                   {d.client_name}
                 </Link>
               ) : (
-                <span className="badge bg-slate-100 text-muted">No client</span>
+                <span className="badge-neutral">No client</span>
               )}
             </div>
             <div className="grid grid-cols-2 gap-2">

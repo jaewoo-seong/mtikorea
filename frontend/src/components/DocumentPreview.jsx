@@ -108,7 +108,7 @@ function TableBlock({ rows }) {
             {header.map((cell, idx) => (
               <th
                 key={idx}
-                className="border border-line bg-slate-50 px-2 py-1 text-left font-semibold"
+                className="border border-line bg-surface px-2 py-1 text-left font-semibold"
               >
                 {cell}
               </th>
@@ -168,7 +168,7 @@ export default function DocumentPreview({ documentId }) {
   if (data?.isImage) {
     return (
       <div className="space-y-2">
-        <div className="rounded-lg border border-line bg-slate-50 p-2 flex items-center justify-center max-h-96 overflow-auto">
+        <div className="border border-line bg-surface p-2 flex items-center justify-center max-h-96 overflow-auto">
           <img src={rawUrl} alt="" className="max-w-full max-h-[22rem] object-contain" />
         </div>
         <a className="text-primary font-medium hover:underline text-xs" href={downloadUrl}>
@@ -181,7 +181,7 @@ export default function DocumentPreview({ documentId }) {
   if (data?.isPdf) {
     return (
       <div className="space-y-2">
-        <iframe title="PDF preview" src={rawUrl} className="w-full h-96 rounded-lg border border-line" />
+        <iframe title="PDF preview" src={rawUrl} className="w-full h-96 border border-line" />
         <a className="text-primary font-medium hover:underline text-xs" href={downloadUrl}>
           Download
         </a>
@@ -191,7 +191,7 @@ export default function DocumentPreview({ documentId }) {
 
   if (!data?.isText) {
     return (
-      <div className="rounded-lg border border-line bg-slate-50 px-3 py-2 text-sm">
+      <div className="border border-line bg-surface px-3 py-2 text-sm">
         <p className="text-muted">
           Preview not available for {data?.mimeType || 'this file type'}
         </p>
@@ -206,7 +206,7 @@ export default function DocumentPreview({ documentId }) {
 
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-line px-3 py-2 max-h-96 overflow-y-auto space-y-3">
+      <div className="border border-line px-3 py-2 max-h-96 overflow-y-auto space-y-3">
         {blocks.map((block, idx) =>
           block.type === 'table' ? (
             <TableBlock key={idx} rows={block.rows} />
